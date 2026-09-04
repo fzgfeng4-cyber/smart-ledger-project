@@ -17,7 +17,7 @@ Smart Ledger 是一个个人长期自用的智能记账项目。项目已经完�
 | 阶段 | 状态 | 说明 |
 | --- | --- | --- |
 | Smart Ledger Web Prototype | 已完成产品和业务逻辑验证 | 已完成 Vue 3 + TypeScript + Vite、FastAPI、SQLite、一句话解析、分类、CRUD、统计、备份、Test 和 Review。 |
-| Smart Ledger Android APP V1 | 正式开始 / Classification Dart Migration 已完成 | Mobile Architecture、Android Build Bootstrap、Mobile Data 和 Classification Dart Migration 已完成；`mobile/` 已具备 Flutter Android 骨架、本地 SQLite 数据层、纯 Dart Parser / Classification，并通过 `flutter pub get`、`flutter analyze`、`flutter test`、`flutter build apk --debug`。 |
+| Smart Ledger Android APP V1 | V1 开发完成 / 冻结归档，真机 UAT 待完成 | `mobile/` 已完成 Flutter UI、App Integration、本地 SQLite、Parser、Classification、备份恢复、自动化测试和 Release APK/AAB 构建；当前仅剩目标 Android 真机安装及设备级 UAT。 |
 
 Web Prototype 的 `frontend/` 和 `backend/` 必须继续保留。不得删除、覆盖或重构它们，也不得让 Android APP 运行时依赖浏览器、Python、FastAPI 或 localhost。
 
@@ -51,11 +51,25 @@ Web Prototype 包含：
 
 ### 5.1 当前状态
 
-Android APP V1 正式开始，当前阶段为：
+Android APP V1 的代码开发和自动化验收已完成，当前进入：
 
-`Classification Dart Migration 完成 / 准备进入 Flutter UI 或 App Integration 前置规划`
+`V1 冻结归档 / 准备进入 V2 规划`
 
-当前已完成项目状态切换、代码边界确认、文档初始化、移动端架构设计、Android 开发环境恢复、Flutter Android 空骨架创建、本地 SQLite 数据层实现，以及一句话 Parser / Classification 的 Dart 迁移实现和最终验证。Android Build Agent 已记录 `docs/android-build-report.md`：Flutter、Dart、JDK、Android SDK、adb、sdkmanager、Gradle 可用，`mobile/` 已创建，Debug APK 已生成。Mobile Data Agent 已记录 `docs/mobile-data-model.md`：Transaction Dart 模型、SQLite schema、Data Source、Repository、分页、统计、软删除、恢复和持久化测试已完成。Classification Dart Migration Agent 已记录 `docs/classification-dart-migration.md`：Parser、ParseResult、分类服务和解析测试已完成；本阶段 `flutter pub get`、`flutter analyze`、`flutter test`、`flutter build apk --debug` 已全部通过。当前仍未实现正式 Flutter UI、APP 集成流程或正式备份业务。
+当前已完成项目状态切换、移动端架构、Android 开发环境恢复、Flutter Android 工程、本地 SQLite 数据层、Dart Parser / Classification、正式 Flutter UI、App Integration、JSON 备份恢复、自动化测试和 Release 构建。`mobile/` 是 Android APP V1 的唯一主要代码目录，`frontend/` 和 `backend/` 仍是独立保留的 Web Prototype。
+
+当前已具备：
+
+- `flutter pub get`、`flutter analyze`、`flutter test` 通过，自动化测试 `51/51`。
+- Debug APK、Release APK 和 AAB 已生成。
+- Release APK/AAB 已使用本地 release keystore 签名并完成签名校验。
+- V1 代码和文档已建立 `v1.0.0-frozen` 归档标签。
+
+当前仍待完成：
+
+- 目标 Android 真机安装和首次启动 UAT。
+- 真机中文输入法、关闭重开、备份恢复及完整操作链路验收。
+
+因此，V1 已完成开发并可作为 V2 基线，但在真机 UAT 完成前不宣称“最终生产上架验收完成”。
 
 ### 5.2 最终目标
 
@@ -214,11 +228,11 @@ Smart Ledger/
 | --- | --- | --- |
 | `frontend/` | 已存在 | Web Prototype 前端。Android 阶段不得修改。 |
 | `backend/` | 已存在 | Web Prototype 后端和 SQLite 参考实现。Android 阶段不得作为运行依赖。 |
-| `mobile/` | 已创建 | Android APP V1 唯一主要代码目录；当前仅为空 Flutter Android 骨架。 |
+| `mobile/` | 已完成 V1 实现 | Android APP V1 唯一主要代码目录，包含 Flutter UI、Parser、SQLite、Repository、备份、测试和 Android 构建配置。 |
 | `docs/` | 已存在 | 项目文档、阶段设计和验收报告。 |
-| `skills/` | 已存在 | 分阶段 Agent 工作规则；Android 阶段需要新增或合并移动端专用 Skill。 |
+| `skills/` | 已存在 | 分阶段 Agent 工作规则，包含 Android 阶段移动端专用 Skill。 |
 
-第 0 步只确认结构，不创建正式 Flutter 业务代码。
+Android 阶段初始化时只确认结构；当前 `mobile/` 已完成 V1 实现，后续 V2 必须基于冻结标签或独立分支继续。
 
 ## 10. Android 权限原则
 
@@ -241,7 +255,7 @@ Android APP V1 是手动一句话记账应用，遵守最小权限原则。
 
 ## 11. Android APP V1 阶段进度
 
-当前不要沿用 Web Prototype 的完成标记。Android APP V1 从第 0 步重新开始。
+以下状态已根据当前 `mobile/` 实际代码、自动化测试、Release 构建和归档文档同步。历史阶段报告保留各阶段当时的验收口径，不代表当前状态。
 
 | 阶段 | 状态 | 说明 |
 | --- | --- | --- |
@@ -249,14 +263,14 @@ Android APP V1 是手动一句话记账应用，遵守最小权限原则。
 | Mobile Architecture | 已完成 | 已在 `docs/mobile-architecture.md` 确定 Flutter 项目结构、依赖、状态管理、模块边界和代码规范。 |
 | Mobile Data Model | 已完成 | 已写入 `docs/mobile-data-model.md`；Transaction、分类、日期、软删除、Repository 和 SQLite schema 已落到 Flutter 数据层。 |
 | Classification Dart Migration | 已完成 | `mobile/lib/domain/parser/` 已实现纯 Dart Parser、分类服务和 ParseResult，`docs/classification-dart-migration.md` 已记录报告；`flutter pub get`、`flutter analyze`、`flutter test`、`flutter build apk --debug` 已全部通过。 |
-| Flutter UI | 未开始 | 实现手机首页、账单列表、账目确认/编辑页和交互状态。 |
-| SQLite Implementation | 已完成（数据层） | 已实现 SQLite 初始化、V1 迁移、CRUD、分页、统计、软删除和恢复；正式备份业务仍留到后续集成阶段。 |
-| App Integration | 未开始 | 串联 UI、解析、数据层、统计、备份和错误提示。 |
-| Android Build | 已完成 / Mobile Data 回归通过 | 已写入 `docs/android-build-report.md`。Android Development Environment 已恢复；`mobile/` 空骨架已创建；Mobile Data 后 `flutter pub get`、`flutter analyze`、`flutter test`、`flutter build apk --debug` 已通过并生成 Debug APK。 |
-| Mobile Test | 未开始 | 完整移动端测试阶段未开始；本阶段已有数据层 SQLite 隔离测试和骨架 Widget 测试通过。 |
-| Mobile Review | 未开始 | 独立审查范围、数据正确性、权限、构建和验收证据。 |
-| APK Delivery | 未开始 | 生成并保留可安装 APK，记录构建环境和安装验证。 |
-| Android APP V1 Complete | 未开始 | 只有 APK 安装、离线记账、SQLite 持久化、统计和备份全部通过后才能标记完成。 |
+| Flutter UI | 已完成 | 已实现首页、快速记账、确认/修改、账单列表、编辑、统计、撤销、加载/空/错误状态和草稿防丢失。 |
+| SQLite Implementation | 已完成 | 已实现 SQLite 初始化、V1 migration、CRUD、分页、统计、软删除、恢复、持久化以及 JSON 备份恢复。 |
+| App Integration | 已完成 | Parser、确认表单、Repository、SQLite、统计、删除撤销、备份恢复和 UI 已串联。 |
+| Android Build | 已完成 | Flutter、Android SDK、JDK、Gradle、Manifest、权限、applicationId、namespace 和 Release 签名构建均已核验。 |
+| Mobile Test | 已完成（自动化） | `flutter analyze` 通过，`flutter test` 为 `51/51`；真机 UAT 尚未执行。 |
+| Mobile Review | 已完成（冻结归档审查） | V1 范围、代码边界、权限、数据、测试、构建和发布文档已完成归档审查。 |
+| APK Delivery | 已完成（候选包） | Release APK 和 AAB 已生成、签名校验通过并保留实际路径；目标 Android 真机安装待执行。 |
+| Android APP V1 Complete | 已完成开发 / 真机 UAT 待完成 | V1 代码和自动化验收完成；最终设备级完成标记须等真机安装、打开、离线记账、重启持久化和备份验收。 |
 
 ## 12. Android 阶段 Agent 分工
 
@@ -350,17 +364,31 @@ Android 阶段保留必要角色，不为了多 Agent 增加无意义文件。
 - `docs/android-build-report.md`：Android 开发环境恢复、Flutter 骨架、Manifest 权限、构建验证和 Debug APK 路径记录。
 - `docs/mobile-data-model.md`：Android APP V1 本地 SQLite 数据模型、Repository/Data Source、迁移、测试和 Debug APK 回归报告。
 - `docs/classification-dart-migration.md`：Android APP V1 一句话 Parser 和分类规则 Dart 迁移报告。
+- `docs/release/v1-development-summary.md`：V1 完整开发总结和冻结基线。
+- `docs/release/production-release-report.md`：Release 签名构建、APK/AAB、权限和产物校验报告。
+- `docs/release/uat-checklist.md`：目标 Android 真机 UAT 清单。
+- `docs/android-v2-plan.md`：V2 开发启动条件、V1 兼容不变量和迁移门槛。
 
-## 17. 下一步建议
+## 17. V1 归档与 V2 前置状态
 
-下一步可以执行：
+V1 当前已经冻结，相关代码和文档位于同一个项目根目录：
 
-`Flutter UI Agent`
+- Android 源码、测试和构建配置：`mobile/`
+- 项目和阶段文档：`PROJECT.md`、`docs/`
+- Web Prototype：`frontend/`、`backend/`
+- Release APK：`mobile/build/app/outputs/flutter-apk/app-release.apk`
+- Release AAB：`mobile/build/app/outputs/bundle/release/app-release.aab`
 
-它只负责在已完成的架构、数据层和 Parser 基线上实现手机端页面与交互，不重做数据层、不修改 Web Prototype、不加入 V2/V3 功能。具体应该解决：
+当前 Git 归档基线：
 
-1. 读取 `PROJECT.md`、`docs/android-v1-plan.md`、`docs/mobile-architecture.md`、`docs/mobile-data-model.md`、`docs/classification-dart-migration.md`、`docs/ui-plan.md` 和 `docs/product-v1.md`。
-2. 设计并实现 Android V1 的最小手机 UI：一句话输入、解析结果确认、字段修改、账单列表、统计展示、删除撤销和备份入口。
-3. UI 必须通过 Provider / ChangeNotifier 调用 Parser 与 Repository，不直接写 SQL。
-4. 保持用户确认后才保存；`ready` 也不能自动落库。
-5. 完成后执行 `flutter analyze`、`flutter test`、`flutter build apk --debug`，不自动进入 APK Delivery。
+- `v1.0.0`：原始 V1 版本标签。
+- `v1.0.0-frozen`：包含最终 V1 文档和 Release 配置的冻结标签。
+
+进入 V2 前必须：
+
+1. 从 `v1.0.0-frozen` 创建独立 V2 分支。
+2. 先建立 V2 产品需求、数据迁移、权限隐私和测试文档。
+3. 保留 V1 的 `amount_cents`、`type`、`original_text`、软删除和备份兼容性。
+4. 不直接修改 V1 冻结提交，不修改 `frontend/` 和 `backend/` 的 Web Prototype。
+5. 目标 Android 真机仍需按 `docs/release/uat-checklist.md` 完成 UAT。
+6. 以 `docs/android-v2-plan.md` 作为 V2 启动门槛；当前移动端 V1 实际备份格式为 JSON，早期 SQLite 备份描述属于历史设计口径，V2 必须先完成兼容决策。
