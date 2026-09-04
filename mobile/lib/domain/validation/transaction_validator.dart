@@ -3,6 +3,8 @@ import '../categories/category_catalog.dart';
 import '../models/ledger_transaction.dart';
 import '../models/transaction_type.dart';
 
+const maxTransactionAmountCents = 9223372036854775807;
+
 final class TransactionValidationException implements Exception {
   const TransactionValidationException(this.message);
 
@@ -127,7 +129,7 @@ final class TransactionValidator {
     required String transactionDate,
     required Clock clock,
   }) {
-    if (amountCents <= 0) {
+    if (amountCents <= 0 || amountCents > maxTransactionAmountCents) {
       throw const TransactionValidationException('金额必须是大于 0 的整数分');
     }
 

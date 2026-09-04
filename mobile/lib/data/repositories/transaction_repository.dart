@@ -1,5 +1,7 @@
 import '../../domain/models/ledger_transaction.dart';
 import '../../domain/models/transaction_type.dart';
+import '../../domain/statistics/statistics_date_range.dart';
+import '../../domain/statistics/statistics_summary.dart';
 import '../../domain/validation/transaction_validator.dart';
 import '../../shared/clock.dart';
 import '../sqlite/transaction_local_data_source.dart';
@@ -15,6 +17,50 @@ final class TransactionRepository {
     final normalized = TransactionValidator.normalizeCreate(input);
     TransactionValidator.validateCreate(normalized, _clock);
     return _dataSource.insert(normalized, now: _clock.now());
+  }
+
+  Future<List<LedgerTransaction>> createBatch(
+    Iterable<NewLedgerTransaction> inputs,
+  ) async {
+    final normalized = inputs
+        .map(TransactionValidator.normalizeCreate)
+        .toList(growable: false);
+    if (normalized.isEmpty) {
+      throw const TransactionValidationException('批量记账至少需要一笔账目');
+    }
+    for (final input in normalized) {
+      TransactionValidator.validateCreate(input, _clock);
+    }
+    return _dataSource.insertBatch(normalized, now: _clock.now());
+  }
+
+  Future<List<LedgerTransaction>> createImportedBatch({
+    required String source,
+    required String fingerprint,
+    required String fileName,
+    required Iterable<NewLedgerTransaction> inputs,
+  }) async {
+    final normalized = inputs
+        .map(TransactionValidator.normalizeCreate)
+        .toList(growable: false);
+    if (normalized.isEmpty) {
+      throw const TransactionValidationException('导入批次至少需要一笔账目');
+    }
+    if (source.trim().isEmpty ||
+        fingerprint.trim().isEmpty ||
+        fileName.trim().isEmpty) {
+      throw const TransactionValidationException('导入批次元数据无效');
+    }
+    for (final input in normalized) {
+      TransactionValidator.validateCreate(input, _clock);
+    }
+    return _dataSource.insertImportedBatch(
+      source: source.trim(),
+      fingerprint: fingerprint.trim(),
+      fileName: fileName.trim(),
+      transactions: normalized,
+      now: _clock.now(),
+    );
   }
 
   Future<LedgerTransaction?> findById(int id, {bool includeDeleted = false}) {
@@ -61,6 +107,25 @@ final class TransactionRepository {
     return _dataSource.listActive(limit: limit, offset: 0);
   }
 
+  Future<List<LedgerTransaction>> activeTransactionsForDateRange({
+    required String startDateInclusive,
+    required String endDateExclusive,
+  }) {
+    final start = startDateInclusive.trim();
+    final end = endDateExclusive.trim();
+    final parsedStart = DateTime.tryParse(start);
+    final parsedEnd = DateTime.tryParse(end);
+    if (parsedStart == null ||
+        parsedEnd == null ||
+        !parsedStart.isBefore(parsedEnd)) {
+      throw const TransactionValidationException('统计日期范围无效');
+    }
+    return _dataSource.listActiveInDateRange(
+      startDateInclusive: start,
+      endDateExclusive: _clampEndDateExclusive(end),
+    );
+  }
+
   Future<LedgerTransaction?> findLatestDuplicateCandidate(
     NewLedgerTransaction input,
   ) async {
@@ -73,6 +138,30 @@ final class TransactionRepository {
       note: normalized.note,
       transactionDate: normalized.transactionDate,
     );
+  }
+
+  Future<StatisticsSummary> statisticsForDateRange(
+    StatisticsDateRange range,
+  ) async {
+    final data = await _dataSource.queryStatistics(
+      startDateInclusive: range.startDateInclusive,
+      endDateExclusive: _clampEndDateExclusive(range.endDateExclusive),
+    );
+    return StatisticsSummary.calculate(
+      range: range,
+      expenseTotalCents: data.expenseTotalCents,
+      incomeTotalCents: data.incomeTotalCents,
+      expenseCategories: data.expenseCategories.map(
+        (category) => StatisticsCategoryAmount(
+          categoryCode: category.categoryCode,
+          amountCents: category.amountCents,
+        ),
+      ),
+    );
+  }
+
+  Future<StatisticsSummary> currentMonthStatistics() {
+    return statisticsForDateRange(StatisticsDateRange.month(_clock.now()));
   }
 
   Future<int> todayExpenseCents() {
@@ -104,7 +193,24 @@ final class TransactionRepository {
     final now = _clock.now();
     final start = DateTime(now.year, now.month);
     final end = DateTime(now.year, now.month + 1);
-    return (start: formatLocalDate(start), end: formatLocalDate(end));
+    return (
+      start: formatLocalDate(start),
+      end: _clampEndDateExclusive(formatLocalDate(end)),
+    );
+  }
+
+  String _clampEndDateExclusive(String endDateExclusive) {
+    final parsedEnd = DateTime.tryParse(endDateExclusive);
+    if (parsedEnd == null) {
+      return endDateExclusive;
+    }
+
+    final now = _clock.now();
+    final tomorrow = DateTime(now.year, now.month, now.day + 1);
+    if (parsedEnd.isAfter(tomorrow)) {
+      return formatLocalDate(tomorrow);
+    }
+    return endDateExclusive;
   }
 
   static void _validatePaging({required int limit, required int offset}) {

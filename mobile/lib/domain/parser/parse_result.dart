@@ -71,6 +71,7 @@ final class ParseIssue {
     'TYPE_UNKNOWN',
     'TYPE_CONFLICT',
     'MISSING_CATEGORY',
+    'INVALID_NOTE',
     'INVALID_DATE',
     'UNSUPPORTED_DATE',
     'DATE_AMBIGUOUS',

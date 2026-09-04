@@ -14,9 +14,9 @@ class TransactionEditorPage extends StatelessWidget {
     return Consumer<LedgerUiController>(
       builder: (context, controller, _) {
         return PopScope<Object?>(
-          canPop: !controller.hasUnsavedDraft,
+          canPop: !controller.isBusy && !controller.hasUnsavedDraft,
           onPopInvokedWithResult: (didPop, _) async {
-            if (didPop) {
+            if (didPop || controller.isBusy) {
               return;
             }
             await _confirmDiscardAndPop(context, controller);
@@ -36,10 +36,20 @@ class _EditorScaffold extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final draft = controller.draft;
+    final isBusy = controller.isBusy;
     if (draft == null) {
       return Scaffold(
         appBar: AppBar(title: const Text('账目')),
-        body: const Center(child: Text('没有正在编辑的账目')),
+        body: Center(
+          child: Padding(
+            padding: const EdgeInsets.all(24),
+            child: Text(
+              controller.editorErrorMessage ?? '没有正在编辑的账目',
+              key: const Key('editor-operation-result'),
+              textAlign: TextAlign.center,
+            ),
+          ),
+        ),
       );
     }
 
@@ -49,48 +59,79 @@ class _EditorScaffold extends StatelessWidget {
         leading: IconButton(
           key: const Key('editor-back'),
           tooltip: '返回',
-          onPressed: () => _confirmDiscardAndPop(context, controller),
+          onPressed: isBusy
+              ? null
+              : () => _confirmDiscardAndPop(context, controller),
           icon: const Icon(Icons.arrow_back),
         ),
         title: Text(draft.mode == EditorMode.edit ? '编辑账目' : '新增账目'),
       ),
       body: SafeArea(
-        child: CustomScrollView(
-          key: const Key('editor-page'),
-          keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
-          slivers: [
-            SliverPadding(
-              padding: const EdgeInsets.fromLTRB(16, 8, 16, 240),
-              sliver: SliverList(
-                delegate: SliverChildListDelegate([
-                  _OriginalTextPanel(draft: draft),
-                  const SizedBox(height: 14),
-                  _IssuePanel(draft: draft),
-                  _MoneyField(draft: draft),
-                  const SizedBox(height: 12),
-                  _TypeField(draft: draft),
-                  const SizedBox(height: 12),
-                  _CategoryField(draft: draft),
-                  const SizedBox(height: 12),
-                  _NoteField(draft: draft),
-                  const SizedBox(height: 12),
-                  _DateField(draft: draft, today: controller.today),
-                  if (draft.mode == EditorMode.edit) ...[
-                    const SizedBox(height: 24),
-                    OutlinedButton.icon(
-                      key: const Key('delete-entry-button'),
-                      onPressed: () => _showDeleteDialog(context, controller),
-                      icon: const Icon(Icons.delete_outline),
-                      label: const Text('删除账目'),
-                      style: OutlinedButton.styleFrom(
-                        foregroundColor: Theme.of(context).colorScheme.error,
-                      ),
+        child: IgnorePointer(
+          ignoring: isBusy,
+          child: CustomScrollView(
+            key: const Key('editor-page'),
+            keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
+            slivers: [
+              SliverPadding(
+                padding: const EdgeInsets.fromLTRB(16, 8, 16, 240),
+                sliver: SliverList(
+                  delegate: SliverChildListDelegate([
+                    _OriginalTextPanel(draft: draft),
+                    const SizedBox(height: 14),
+                    _IssuePanel(draft: draft),
+                    _MoneyField(draft: draft, enabled: !isBusy),
+                    const SizedBox(height: 12),
+                    _TypeField(draft: draft, enabled: !isBusy),
+                    const SizedBox(height: 12),
+                    _CategoryField(draft: draft, enabled: !isBusy),
+                    const SizedBox(height: 12),
+                    _NoteField(draft: draft, enabled: !isBusy),
+                    const SizedBox(height: 12),
+                    _DateField(
+                      draft: draft,
+                      today: controller.today,
+                      enabled: !isBusy,
                     ),
-                  ],
-                ]),
+                    if (draft.mode == EditorMode.edit) ...[
+                      const SizedBox(height: 24),
+                      OutlinedButton.icon(
+                        key: const Key('delete-entry-button'),
+                        onPressed: isBusy
+                            ? null
+                            : () async {
+                                final confirmed = await _showDeleteDialog(
+                                  context,
+                                  controller,
+                                );
+                                if (!confirmed || !context.mounted) {
+                                  return;
+                                }
+                                await _waitForEditorRouteToBecomeCurrent(
+                                  context,
+                                );
+                                if (!context.mounted) {
+                                  return;
+                                }
+                                final deleted =
+                                    await controller.deleteCurrentEntry();
+                                if (deleted && context.mounted) {
+                                  Navigator.of(context).pop();
+                                }
+                              },
+                        icon: const Icon(Icons.delete_outline),
+                        label: const Text('删除账目'),
+                        style: OutlinedButton.styleFrom(
+                          foregroundColor:
+                              Theme.of(context).colorScheme.error,
+                        ),
+                      ),
+                    ],
+                  ]),
+                ),
               ),
-            ),
-          ],
+            ],
+          ),
         ),
       ),
       bottomNavigationBar: SafeArea(
@@ -124,7 +165,7 @@ class _EditorScaffold extends StatelessWidget {
                 ),
               FilledButton.icon(
                 key: const Key('editor-save'),
-                onPressed: controller.canSaveDraft
+                onPressed: !isBusy && controller.canSaveDraft
                     ? () async {
                         final saved = await controller.saveDraft();
                         if (saved) {
@@ -270,6 +311,13 @@ class _IssueItem extends StatelessWidget {
               icon: const Icon(Icons.check_circle_outline),
               label: const Text('确认当前分类'),
             ),
+          if (issue.code == 'LOCAL_CLASSIFICATION_SUGGESTION')
+            TextButton.icon(
+              key: const Key('acknowledge-local-classification'),
+              onPressed: () => controller.acknowledgeIssue(issue.code),
+              icon: const Icon(Icons.check_circle_outline),
+              label: const Text('确认本地分类建议'),
+            ),
           if (issue.code == 'MULTIPLE_AMOUNTS')
             Wrap(
               spacing: 8,
@@ -301,15 +349,17 @@ class _IssueItem extends StatelessWidget {
 }
 
 class _MoneyField extends StatelessWidget {
-  const _MoneyField({required this.draft});
+  const _MoneyField({required this.draft, required this.enabled});
 
   final EditorDraft draft;
+  final bool enabled;
 
   @override
   Widget build(BuildContext context) {
     final controller = context.read<LedgerUiController>();
     return TextFormField(
       key: const Key('editor-amount-field'),
+      enabled: enabled,
       initialValue: draft.amountText,
       decoration: const InputDecoration(
         labelText: '金额',
@@ -323,9 +373,10 @@ class _MoneyField extends StatelessWidget {
 }
 
 class _TypeField extends StatelessWidget {
-  const _TypeField({required this.draft});
+  const _TypeField({required this.draft, required this.enabled});
 
   final EditorDraft draft;
+  final bool enabled;
 
   @override
   Widget build(BuildContext context) {
@@ -343,14 +394,18 @@ class _TypeField extends StatelessWidget {
               label: const Text('支出'),
               avatar: const Icon(Icons.arrow_upward),
               selected: draft.type == TransactionType.expense,
-              onSelected: (_) => controller.updateType(TransactionType.expense),
+              onSelected: enabled
+                  ? (_) => controller.updateType(TransactionType.expense)
+                  : null,
             ),
             ChoiceChip(
               key: const Key('type-income'),
               label: const Text('收入'),
               avatar: const Icon(Icons.arrow_downward),
               selected: draft.type == TransactionType.income,
-              onSelected: (_) => controller.updateType(TransactionType.income),
+              onSelected: enabled
+                  ? (_) => controller.updateType(TransactionType.income)
+                  : null,
             ),
           ],
         ),
@@ -360,9 +415,10 @@ class _TypeField extends StatelessWidget {
 }
 
 class _CategoryField extends StatelessWidget {
-  const _CategoryField({required this.draft});
+  const _CategoryField({required this.draft, required this.enabled});
 
   final EditorDraft draft;
+  final bool enabled;
 
   @override
   Widget build(BuildContext context) {
@@ -386,7 +442,9 @@ class _CategoryField extends StatelessWidget {
                     key: Key('category-${category.code}'),
                     label: Text(category.label),
                     selected: draft.category == category.code,
-                    onSelected: (_) => controller.updateCategory(category.code),
+                    onSelected: enabled
+                        ? (_) => controller.updateCategory(category.code)
+                        : null,
                   ),
                 )
                 .toList(),
@@ -397,9 +455,10 @@ class _CategoryField extends StatelessWidget {
 }
 
 class _NoteField extends StatelessWidget {
-  const _NoteField({required this.draft});
+  const _NoteField({required this.draft, required this.enabled});
 
   final EditorDraft draft;
+  final bool enabled;
 
   @override
   Widget build(BuildContext context) {
@@ -407,6 +466,7 @@ class _NoteField extends StatelessWidget {
     return TextFormField(
       key: const Key('editor-note-field'),
       initialValue: draft.note,
+      enabled: enabled,
       decoration: const InputDecoration(
         labelText: '备注',
         hintText: '未填写',
@@ -419,10 +479,15 @@ class _NoteField extends StatelessWidget {
 }
 
 class _DateField extends StatelessWidget {
-  const _DateField({required this.draft, required this.today});
+  const _DateField({
+    required this.draft,
+    required this.today,
+    required this.enabled,
+  });
 
   final EditorDraft draft;
   final DateTime today;
+  final bool enabled;
 
   @override
   Widget build(BuildContext context) {
@@ -431,6 +496,7 @@ class _DateField extends StatelessWidget {
     return TextFormField(
       key: const Key('editor-date-field'),
       initialValue: draft.transactionDate,
+      enabled: enabled,
       decoration: InputDecoration(
         labelText: '日期',
         helperText: formatDateLabel(draft.transactionDate, today),
@@ -448,6 +514,9 @@ Future<void> _confirmDiscardAndPop(
   LedgerUiController controller, {
   bool force = false,
 }) async {
+  if (controller.isBusy) {
+    return;
+  }
   if (!controller.hasUnsavedDraft || force) {
     controller.discardEditorChanges();
     if (context.mounted) {
@@ -483,18 +552,18 @@ Future<void> _confirmDiscardAndPop(
   }
 }
 
-Future<void> _showDeleteDialog(
+Future<bool> _showDeleteDialog(
   BuildContext context,
   LedgerUiController controller,
-) async {
+) {
   final draft = controller.draft;
   if (draft == null) {
-    return;
+    return Future.value(false);
   }
 
-  final confirmed = await showDialog<bool>(
+  return showDialog<bool>(
     context: context,
-    builder: (context) => AlertDialog(
+    builder: (dialogContext) => AlertDialog(
       key: const Key('delete-confirmation-dialog'),
       title: const Text('确定删除这笔账吗？'),
       content: Text(
@@ -506,27 +575,34 @@ Future<void> _showDeleteDialog(
       actions: [
         TextButton(
           key: const Key('cancel-delete'),
-          onPressed: () => Navigator.of(context).pop(false),
+          onPressed: () => Navigator.of(dialogContext).pop(false),
           child: const Text('取消'),
         ),
         FilledButton.icon(
           key: const Key('confirm-delete'),
-          onPressed: () => Navigator.of(context).pop(true),
+          onPressed: () => Navigator.of(dialogContext).pop(true),
           icon: const Icon(Icons.delete_outline),
           label: const Text('删除账目'),
           style: FilledButton.styleFrom(
-            backgroundColor: Theme.of(context).colorScheme.error,
-            foregroundColor: Theme.of(context).colorScheme.onError,
+            backgroundColor: Theme.of(dialogContext).colorScheme.error,
+            foregroundColor: Theme.of(dialogContext).colorScheme.onError,
           ),
         ),
       ],
     ),
-  );
+  ).then((confirmed) => confirmed ?? false);
+}
 
-  if (confirmed == true && context.mounted) {
-    final deleted = await controller.deleteCurrentEntry();
-    if (deleted && context.mounted) {
-      Navigator.of(context).pop();
+Future<void> _waitForEditorRouteToBecomeCurrent(BuildContext context) async {
+  final route = ModalRoute.of(context);
+  if (route == null || route.isCurrent) {
+    return;
+  }
+
+  for (var attempt = 0; attempt < 10; attempt += 1) {
+    await WidgetsBinding.instance.endOfFrame;
+    if (route.isCurrent) {
+      return;
     }
   }
 }

@@ -17,7 +17,7 @@
 | 类型 | 实际路径 | 大小 |
 | --- | --- | ---: |
 | Release APK | `mobile/build/app/outputs/flutter-apk/app-release.apk` | 50,577,900 字节 |
-| Release AAB | `mobile/build/app/outputs/bundle/release/app-release.aab` | 49,656,516 字节 |
+| Release AAB | `mobile/build/app/outputs/bundle/release/app-release.aab` | 49,656,589 字节 |
 | 用户测试清单 | `docs/release/uat-checklist.md` | 本目录 |
 | 发布说明 | `docs/release/release-notes-v1.0.0.md` | 本目录 |
 | 最终交付报告 | `docs/release/final-delivery-report.md` | 本目录 |
@@ -26,8 +26,8 @@
 
 | 文件 | SHA-256 |
 | --- | --- |
-| `app-release.apk` | `927E4F035F4E83A947BE6102C573013FE049A1F8B4BE4E3ECD65A9F376EE12AA` |
-| `app-release.aab` | `CEAAD1D77F9804CEDC33BB1EB65EFF95F46B84BC627B673A661295608A80D01B` |
+| `app-release.apk` | `0DE4E69F424DEED9B1C1E4EAC54C4A1CBC4E58AC45E1529CA1DFCCD750D925A8` |
+| `app-release.aab` | `6D37EDD529119EE909301D46673732BD7C272668ABE2C694967D837A910569D8` |
 
 ## 交付范围
 
@@ -45,6 +45,6 @@
 
 ## 交付前注意事项
 
-- 当前 Release 构建配置使用 Android debug signing，仅适合内部验收和候选包分发；正式上架前必须替换为组织持有的 release keystore，并安全保管签名材料。
+- 当前 Release 构建配置使用本地 release keystore，APK/AAB 签名校验已通过。签名材料位于本机并由 `.gitignore` 排除，不应提交到 Git 或写入密码。
 - 当前环境未连接 Android 真机，APK 安装、首次启动和硬件键盘行为需要在目标设备上执行 `uat-checklist.md`。
-- Git 仓库在本轮开始时尚无提交，归档状态以最终 `Release Archive Report` 为准。
+- Git 已建立 `v1.0.0` 和 `v1.0.0-frozen` 归档标签；V2 应从冻结标签创建独立分支。

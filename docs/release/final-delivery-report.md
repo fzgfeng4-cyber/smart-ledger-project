@@ -16,18 +16,18 @@
 | 产物 | 路径 | 大小 |
 | --- | --- | ---: |
 | APK | `mobile/build/app/outputs/flutter-apk/app-release.apk` | 50,577,900 字节 |
-| AAB | `mobile/build/app/outputs/bundle/release/app-release.aab` | 49,656,516 字节 |
+| AAB | `mobile/build/app/outputs/bundle/release/app-release.aab` | 49,656,589 字节 |
 
 APK SHA-256：
 
 ```text
-927E4F035F4E83A947BE6102C573013FE049A1F8B4BE4E3ECD65A9F376EE12AA
+0DE4E69F424DEED9B1C1E4EAC54C4A1CBC4E58AC45E1529CA1DFCCD750D925A8
 ```
 
 AAB SHA-256：
 
 ```text
-CEAAD1D77F9804CEDC33BB1EB65EFF95F46B84BC627B673A661295608A80D01B
+6D37EDD529119EE909301D46673732BD7C272668ABE2C694967D837A910569D8
 ```
 
 ## 测试结果
@@ -66,7 +66,7 @@ Android Manifest 未声明无关权限，未发现以下权限：
 
 ## Release 状态
 
-候选构建产物和自动化验证通过。由于当前 Release 使用 debug signing，且未执行真机安装，最终生产上架前仍需完成正式签名和目标设备 UAT。
+Release 构建产物、正式签名和自动化验证通过。由于尚未执行真机安装，最终设备级发布验收仍需完成目标设备 UAT。
 
 ## 边界确认
 
@@ -74,8 +74,8 @@ Android Manifest 未声明无关权限，未发现以下权限：
 - `backend/` 未修改
 - 未新增 V2/V3 功能
 - 未新增无关 Android 权限
-- 未重新开发 Android Build Bootstrap、Mobile Data、Classification Migration、Flutter UI 或 App Integration
+- Android Build Bootstrap、Mobile Data、Classification Migration、Flutter UI 和 App Integration 均已完成并归档
 
 ## 归档状态
 
-本报告创建时仓库尚无历史提交。生产归档应包含本目录文档，并在 Git 中建立首个 `v1.0.0` 归档提交和对应标签；提交后用 `git status --short` 确认无未提交关键文件。
+本报告已纳入 V1 冻结归档。当前 Git 已存在 `v1.0.0` 和 `v1.0.0-frozen` 标签；工作区应继续保持干净，V2 需从冻结标签创建独立分支。

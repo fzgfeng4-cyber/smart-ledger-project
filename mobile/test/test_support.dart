@@ -2,7 +2,10 @@ import 'dart:io';
 
 import 'package:path/path.dart' as path;
 import 'package:smartledger/data/backup/backup_service.dart';
+import 'package:smartledger/data/budget/budget_local_data_source.dart';
+import 'package:smartledger/data/budget/budget_repository.dart';
 import 'package:smartledger/data/repositories/transaction_repository.dart';
+import 'package:smartledger/data/search/transaction_search_repository.dart';
 import 'package:smartledger/data/sqlite/app_database.dart';
 import 'package:smartledger/data/sqlite/database_schema.dart';
 import 'package:smartledger/data/sqlite/transaction_local_data_source.dart';
@@ -18,7 +21,9 @@ final class TestLedgerFixture {
     required this.database,
     required this.clock,
     required this.repository,
+    required this.searchRepository,
     required this.backupService,
+    required this.budgetRepository,
     required this.pageSize,
   });
 
@@ -26,7 +31,9 @@ final class TestLedgerFixture {
   Database database;
   final MutableClock clock;
   final TransactionRepository repository;
+  final TransactionSearchRepository searchRepository;
   final BackupService backupService;
+  final BudgetRepository budgetRepository;
   final int pageSize;
   late LedgerUiController controller;
   bool _databaseClosed = false;
@@ -35,9 +42,21 @@ final class TestLedgerFixture {
     DateTime? now,
     int pageSize = 20,
   }) async {
-    final tempDir = await Directory.systemTemp.createTemp(
-      'smart_ledger_ui_test_',
-    );
+    sqfliteFfiInit();
+    var suffix = DateTime.now().microsecondsSinceEpoch;
+    late Directory tempDir;
+    while (true) {
+      final candidate = Directory(
+        path.join(Directory.systemTemp.path, 'smartledger_v2_test_$suffix'),
+      );
+      try {
+        candidate.createSync(recursive: true);
+        tempDir = candidate;
+        break;
+      } on FileSystemException {
+        suffix += 1;
+      }
+    }
     final databasePath = path.join(tempDir.path, 'smart-ledger-test.sqlite');
     final database = await AppDatabase.openAtPath(
       databasePath,
@@ -45,15 +64,21 @@ final class TestLedgerFixture {
     );
     final clock = MutableClock(now ?? DateTime(2026, 8, 31, 10, 30));
     final dataSource = TransactionLocalDataSource(database);
+    final budgetDataSource = BudgetLocalDataSource(database);
     final repository = TransactionRepository(dataSource, clock: clock);
+    final budgetRepository = BudgetRepository(budgetDataSource, clock: clock);
+    final searchRepository = TransactionSearchRepository(dataSource);
     final backupService = BackupService(
       dataSource: dataSource,
+      budgetDataSource: budgetDataSource,
       clock: clock,
       backupDirectoryPath: path.join(tempDir.path, 'backups'),
     );
     final controller = LedgerUiController(
       repository: repository,
+      searchRepository: searchRepository,
       backupService: backupService,
+      budgetRepository: budgetRepository,
       clock: clock,
       pageSize: pageSize,
     );
@@ -63,7 +88,9 @@ final class TestLedgerFixture {
       database: database,
       clock: clock,
       repository: repository,
+      searchRepository: searchRepository,
       backupService: backupService,
+      budgetRepository: budgetRepository,
       pageSize: pageSize,
     );
     fixture.controller = controller;
@@ -99,6 +126,8 @@ final class TestLedgerFixture {
   }
 
   Future<void> reset() async {
+    await database.delete(DatabaseSchema.budgetsTable);
+    await database.delete(DatabaseSchema.importBatchesTable);
     await database.delete(DatabaseSchema.transactionsTable);
     recreateController();
     await controller.initialize();
@@ -108,7 +137,9 @@ final class TestLedgerFixture {
     controller.dispose();
     controller = LedgerUiController(
       repository: repository,
+      searchRepository: searchRepository,
       backupService: backupService,
+      budgetRepository: budgetRepository,
       clock: clock,
       pageSize: pageSize,
     );

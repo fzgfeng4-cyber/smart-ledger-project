@@ -28,7 +28,7 @@
 
 ## 已知限制
 
-- 当前 Release 构建使用 debug signing，不能直接作为正式应用商店签名包；正式生产发布前需要使用受控 release keystore 重新构建。
+- 当前 Release 构建已使用本地 release keystore 并完成签名校验；签名材料不进入 Git。正式应用商店发布前仍应按组织发布流程管理签名和密钥保管。
 - 当前未连接 Android 真机，安装、首次启动和设备级输入法验收需要在目标设备上补做。
 - 备份恢复仅支持当前 `backup_version = 1` 和 `database_version = 1`。
 - 当前仅提供本地能力，不提供云同步、登录、多用户或第三方平台导入。

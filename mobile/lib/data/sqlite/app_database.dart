@@ -47,6 +47,7 @@ final class AppDatabase {
           onCreate: DatabaseSchema.onCreate,
           onUpgrade: DatabaseSchema.onUpgrade,
           onDowngrade: DatabaseSchema.onDowngrade,
+          onOpen: DatabaseSchema.onOpen,
         ),
       );
     }
@@ -58,6 +59,7 @@ final class AppDatabase {
       onCreate: DatabaseSchema.onCreate,
       onUpgrade: DatabaseSchema.onUpgrade,
       onDowngrade: DatabaseSchema.onDowngrade,
+      onOpen: DatabaseSchema.onOpen,
     );
   }
 }

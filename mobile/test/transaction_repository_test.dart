@@ -351,6 +351,66 @@ void main() {
     expect(await repository.list(), hasLength(2));
   });
 
+  test('本月收支汇总不计入业务日之后的未来日期', () async {
+    clock.set(DateTime.utc(2026, 8, 31, 10, 30));
+    await repository.create(
+      _newTransaction(amountCents: 3500, transactionDate: '2026-08-31'),
+    );
+    await db.insert(DatabaseSchema.transactionsTable, {
+      'amount_cents': 1200,
+      'type': 'expense',
+      'category': 'groceries_food',
+      'note': '未来支出',
+      'original_text': '未来支出',
+      'transaction_date': '2026-09-01',
+      'created_at': '2026-08-31T10:00:00Z',
+      'updated_at': '2026-08-31T10:00:00Z',
+      'deleted_at': null,
+    });
+    await db.insert(DatabaseSchema.transactionsTable, {
+      'amount_cents': 8000,
+      'type': 'income',
+      'category': 'salary',
+      'note': '未来收入',
+      'original_text': '未来收入',
+      'transaction_date': '2026-09-01',
+      'created_at': '2026-08-31T10:00:00Z',
+      'updated_at': '2026-08-31T10:00:00Z',
+      'deleted_at': null,
+    });
+
+    expect(await repository.monthExpenseCents(), 3500);
+    expect(await repository.monthIncomeCents(), 0);
+  });
+
+  test('批量创建使用单个事务，全部成功后返回全部记录', () async {
+    final created = await repository.createBatch([
+      _newTransaction(amountCents: 1000, originalText: '买菜10元'),
+      _newTransaction(
+        amountCents: 2000,
+        category: 'dining',
+        note: '午饭',
+        originalText: '午饭20元',
+      ),
+    ]);
+
+    expect(created, hasLength(2));
+    expect(created.map((entry) => entry.amountCents), [1000, 2000]);
+    expect(await repository.list(), hasLength(2));
+  });
+
+  test('批量创建遇到非法记录时整批回滚', () async {
+    await expectLater(
+      repository.createBatch([
+        _newTransaction(amountCents: 1000, originalText: '买菜10元'),
+        _newTransaction(amountCents: 0, originalText: '无效账目'),
+      ]),
+      throwsA(isA<TransactionValidationException>()),
+    );
+
+    expect(await repository.list(), isEmpty);
+  });
+
   test('deleted records cannot be edited before restore', () async {
     final created = await repository.create(_newTransaction());
     await repository.softDelete(created.id);

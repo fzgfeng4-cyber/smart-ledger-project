@@ -31,7 +31,7 @@ final class LedgerTransaction {
     final deletedAtValue = map['deleted_at'];
     return LedgerTransaction(
       id: _readInt(map, 'id'),
-      amountCents: _readInt(map, 'amount_cents'),
+      amountCents: _readAmountCents(map['amount_cents']),
       type: TransactionType.fromCode(_readString(map, 'type')),
       category: _readString(map, 'category'),
       note: map['note'] as String?,
@@ -181,6 +181,20 @@ int _readInt(Map<String, Object?> map, String key) {
     return value;
   }
   throw StateError('字段 $key 不是整数');
+}
+
+int _readAmountCents(Object? value) {
+  if (value is int) {
+    return value;
+  }
+  if (value is double &&
+      value.isFinite &&
+      value == value.truncateToDouble() &&
+      value > 0 &&
+      value <= 9223372036854775807) {
+    return value.toInt();
+  }
+  throw StateError('字段 amount_cents 不是可安全转换的整数分');
 }
 
 String _readString(Map<String, Object?> map, String key) {

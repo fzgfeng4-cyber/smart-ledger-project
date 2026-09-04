@@ -353,7 +353,7 @@ G:\DevTools\AndroidEnv\workspace\smart-ledger-project\mobile\build\app\outputs\f
 - 下一阶段仍不得修改 `frontend/`、`backend/`。
 - 下一阶段不得跳过数据模型设计直接堆业务 UI。
 
-## 16. 本阶段明确未做
+## 16. 本阶段明确未做（Build Bootstrap 当时状态）
 
 - 未实现 transactions SQLite schema。
 - 未实现 Repository。
@@ -365,3 +365,14 @@ G:\DevTools\AndroidEnv\workspace\smart-ledger-project\mobile\build\app\outputs\f
 - 未实现账单列表、编辑、软删除、撤销、统计或备份。
 - 未添加 OCR、通知、微信、支付宝、AI SDK、云服务或 V2/V3 功能。
 - 未交付最终 Android APP V1 APK。
+
+## 17. 后续阶段状态说明（2026-09-01）
+
+以上内容是 Android Build Bootstrap 阶段的历史报告，记录当时空骨架阶段尚未完成的事项。后续 Mobile Data、Classification Dart Migration、Flutter UI、App Integration 和 Release 阶段已经完成，当前最终状态以以下文档为准：
+
+- `PROJECT.md`
+- `docs/release/v1-development-summary.md`
+- `docs/release/production-release-report.md`
+- `docs/release/uat-checklist.md`
+
+当前已存在并完成签名校验的 Release APK 和 AAB，但目标 Android 真机安装及设备级 UAT 仍待执行。

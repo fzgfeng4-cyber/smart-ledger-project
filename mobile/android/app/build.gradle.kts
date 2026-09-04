@@ -62,6 +62,11 @@ android {
     }
 }
 
+dependencies {
+    // Bundled 模型在构建时打包，识别过程不依赖网络或 Google Play Services 下载。
+    implementation("com.google.mlkit:text-recognition-chinese:16.0.1")
+}
+
 kotlin {
     compilerOptions {
         jvmTarget = org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_17

@@ -4,7 +4,7 @@
 
 本文是 Smart Ledger Android APP V1 的阶段总说明。它不替代既有产品、数据、分类、UI、API、测试和 Review 文档，而是说明 Android 阶段如何复用 Web Prototype 的已验证成果，并重新建立移动端代码边界。
 
-本阶段从 `PROJECT.md` 的 Android APP V1 状态开始。当前只做规划和边界初始化，不创建 Flutter 业务代码、不创建 SQLite 数据库、不生成 APK。
+本文最初用于 Android 阶段规划和边界初始化。当前 Android APP V1 已完成代码开发、自动化验证和 Release 构建，并已进入 V1 冻结归档；文中早期“尚未创建 mobile/”等表述属于启动阶段记录，当前状态以 `PROJECT.md` 和 `docs/release/` 下的最终归档文档为准。
 
 ## 2. Web Prototype 正式状态
 
@@ -112,7 +112,7 @@ backend/   Web Prototype，Android 阶段不作为运行依赖
 mobile/    Flutter Android APP，后续 Android V1 唯一主要代码目录
 ```
 
-第 0 步不创建 `mobile/`。是否通过 `flutter create mobile` 生成项目，由 Mobile Architecture Agent 在下一阶段提出并等待确认。
+Android 阶段初始化时只确认代码边界；当前 `mobile/` 已作为 Android APP V1 唯一主要代码目录完成实现。后续 V2 必须使用独立分支或明确的 V2 模块，不得覆盖 Web Prototype。
 
 ## 8. 权限原则
 
@@ -179,19 +179,25 @@ Android 阶段保留这些 Agent：
 
 每一步完成后必须记录状态和证据。未经用户确认，不自动进入下一步。
 
-## 12. 下一步
+## 12. 当前归档状态和后续方向
 
-下一步应执行 Mobile Architecture Agent。
+Android APP V1 已完成：
 
-它只解决：
+- Flutter + Dart 应用代码。
+- 本地 SQLite 数据层、Repository、分页、统计、软删除和恢复。
+- 纯 Dart Parser / Classification。
+- Flutter UI 和 App Integration。
+- JSON 备份恢复。
+- `flutter analyze`、`flutter test`、Debug/Release APK 和 AAB 验证。
+- Release 签名、包名、权限和构建产物归档。
 
-- `mobile/` 标准 Flutter 项目创建方式。
-- Flutter/Dart/Android SDK 基线。
-- 依赖选择原则。
-- 状态管理方案。
-- `lib/` 目录结构。
-- model、service、repository、UI 的边界。
-- 最小权限如何在 Android 工程中落实。
-- 后续 Agent 的文件所有权。
+当前仍待完成：
 
-Mobile Architecture Agent 不实现业务页面、不写完整解析器、不创建真实账目数据库、不生成 APK。
+- 目标 Android 真机安装和启动验证。
+- 真机中文输入法、离线记账、关闭重开、备份恢复和完整操作链路 UAT。
+
+下一步不是继续拆分 V1 Agent，而是：
+
+1. 按 `docs/release/uat-checklist.md` 完成真机 UAT。
+2. 以 `v1.0.0-frozen` 为基线创建 V2 独立分支。
+3. 先建立 V2 产品需求、数据迁移、权限隐私和测试计划，再实现 V2 功能。
