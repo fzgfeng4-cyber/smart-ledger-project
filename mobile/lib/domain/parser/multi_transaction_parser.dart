@@ -1,5 +1,6 @@
 import '../../shared/clock.dart';
 import 'batch_parse_result.dart';
+import 'parse_result.dart';
 import 'transaction_parser.dart';
 
 final class MultiTransactionParser {
@@ -11,7 +12,9 @@ final class MultiTransactionParser {
   final Clock _clock;
 
   BatchParseResult parse(String text, {DateTime? today}) {
-    final lines = _splitIntoLines(text);
+    final effectiveToday = today ?? _clock.now();
+    final lines = _splitIntoLines(text, today: effectiveToday);
+    final sharedDate = _sharedDate(text, effectiveToday);
     final transactions = <BatchTransaction>[];
     for (var index = 0; index < lines.length; index += 1) {
       final originalLine = lines[index];
@@ -19,9 +22,10 @@ final class MultiTransactionParser {
         BatchTransaction(
           candidateId: index + 1,
           originalLine: originalLine,
-          parseResult: _transactionParser.parse(
-            _removeIdentifierValues(originalLine),
-            today: today ?? _clock.now(),
+          parseResult: _parseLine(
+            originalLine,
+            today: effectiveToday,
+            sharedDate: sharedDate,
           ),
         ),
       );
@@ -30,9 +34,9 @@ final class MultiTransactionParser {
     return BatchParseResult(originalText: text, transactions: transactions);
   }
 
-  List<String> _splitIntoLines(String text) {
+  List<String> _splitIntoLines(String text, {required DateTime today}) {
     final normalized = text.replaceAll('\r\n', '\n').replaceAll('\r', '\n');
-    final hardSegments = normalized.split(RegExp(r'\n|[，,；;、]+'));
+    final hardSegments = normalized.split(RegExp(r'\n|[，,；;、。！？!?]+'));
     final segments = <String>[];
     for (var index = 0; index < hardSegments.length; index += 1) {
       final segment = hardSegments[index];
@@ -42,7 +46,72 @@ final class MultiTransactionParser {
       }
       segments.addAll(_splitContinuousSegment(segment));
     }
-    return segments.isEmpty ? [text] : segments;
+    if (segments.length <= 1) {
+      return segments.isEmpty ? [text] : segments;
+    }
+
+    final withoutSharedDate = segments
+        .where((segment) => !_isStandaloneDateMarker(segment, today))
+        .toList();
+    return withoutSharedDate.isEmpty ? [text] : withoutSharedDate;
+  }
+
+  bool _isStandaloneDateMarker(String segment, DateTime today) {
+    final trimmed = segment.trim();
+    if (!_dateOnlyPattern.hasMatch(trimmed)) {
+      return false;
+    }
+
+    final parsed = _transactionParser.parse(trimmed, today: today);
+    return parsed.draft?.transactionDate != null;
+  }
+
+  ParseResult _parseLine(
+    String originalLine, {
+    required DateTime today,
+    required String? sharedDate,
+  }) {
+    final result = _transactionParser.parse(
+      _removeIdentifierValues(originalLine),
+      today: today,
+    );
+    if (sharedDate == null || _containsDateExpression(originalLine)) {
+      return result;
+    }
+
+    final draft = result.draft;
+    if (draft == null) {
+      return result;
+    }
+
+    return ParseResult(
+      status: result.status,
+      originalText: result.originalText,
+      draft: TransactionDraft(
+        amountCents: draft.amountCents,
+        type: draft.type,
+        category: draft.category,
+        note: draft.note,
+        originalText: draft.originalText,
+        transactionDate: sharedDate,
+      ),
+      missingFields: result.missingFields,
+      issues: result.issues,
+    );
+  }
+
+  String? _sharedDate(String text, DateTime today) {
+    if (!_containsDateExpression(text)) {
+      return null;
+    }
+
+    final parsed = _transactionParser.parse(text, today: today).draft;
+    return parsed?.transactionDate;
+  }
+
+  bool _containsDateExpression(String text) {
+    return _datePatterns.any((pattern) => pattern.hasMatch(text)) ||
+        _relativeDatePattern.hasMatch(text);
   }
 
   List<String> _splitContinuousSegment(String segment) {
@@ -113,3 +182,8 @@ final _datePatterns = <RegExp>[
   RegExp(r'\d{4}年\d{1,2}月\d{1,2}(?:日|号)'),
   RegExp(r'\d{1,2}月\d{1,2}(?:日|号)'),
 ];
+
+final _relativeDatePattern = RegExp(r'今天|昨天|前天');
+final _dateOnlyPattern = RegExp(
+  r'^(?:\d{4}-\d{2}-\d{2}|\d{4}年\d{1,2}月\d{1,2}(?:日|号)|\d{1,2}月\d{1,2}(?:日|号)|今天|昨天|前天)$',
+);

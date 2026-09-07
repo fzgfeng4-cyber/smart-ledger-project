@@ -95,7 +95,7 @@ void main() {
         '奖金500',
         50000,
         TransactionType.income,
-        'other_income',
+        'bonus',
         '奖金',
         '2026-08-30',
       ),
@@ -127,7 +127,7 @@ void main() {
         '买衣服200',
         20000,
         TransactionType.expense,
-        'other_expense',
+        'clothing_beauty',
         '买衣服',
         '2026-08-30',
       ),
@@ -258,9 +258,11 @@ void main() {
 
   test('income keywords use income type and fixed income category codes', () {
     final cases = {
-      '分红500': 'other_income',
+      '分红500': 'investment_income',
+      '奖金500': 'bonus',
       '收款100': 'other_income',
       '薪资9000': 'salary',
+      '收入100': 'other_income',
     };
 
     for (final entry in cases.entries) {
@@ -285,6 +287,42 @@ void main() {
       expect(result.draft!.type, TransactionType.expense, reason: entry.key);
       expect(result.draft!.category, entry.value, reason: entry.key);
     }
+  });
+
+  test('新增固定支出和收入分类可由一句话稳定解析', () {
+    final cases = {
+      '买衣服200': ('clothing_beauty', TransactionType.expense),
+      '培训费800': ('education_learning', TransactionType.expense),
+      '酒店住宿500': ('travel_vacation', TransactionType.expense),
+      '随礼200': ('gifts_social', TransactionType.expense),
+      '猫砂60': ('pets', TransactionType.expense),
+      '买手机2000': ('digital_appliances', TransactionType.expense),
+      '瑜伽300': ('fitness_sports', TransactionType.expense),
+      '分期还款1000': ('debt_repayment', TransactionType.expense),
+      '交个税50': ('taxes_fees', TransactionType.expense),
+      '募捐100': ('charity_donation', TransactionType.expense),
+      '绩效奖金5000': ('bonus', TransactionType.income),
+      '劳务费600': ('freelance', TransactionType.income),
+      '经营收入3000': ('business_income', TransactionType.income),
+      '股息收入50': ('investment_income', TransactionType.income),
+      '租赁收入2000': ('rental_income', TransactionType.income),
+      '津贴500': ('benefits_subsidies', TransactionType.income),
+      '退休工资3000': ('pension', TransactionType.income),
+      '收到礼金200': ('gift_red_envelope', TransactionType.income),
+    };
+
+    for (final entry in cases.entries) {
+      final result = parser.parse(entry.key);
+      expect(result.draft!.category, entry.value.$1, reason: entry.key);
+      expect(result.draft!.type, entry.value.$2, reason: entry.key);
+    }
+  });
+
+  test('服饰关键词使用服饰美容固定分类', () {
+    final result = parser.parse('买衣服200');
+
+    expect(result.draft!.category, 'clothing_beauty');
+    expect(result.draft!.type, TransactionType.expense);
   });
 
   test('core consumption behavior wins over child scene keyword', () {
@@ -354,6 +392,40 @@ void main() {
     expect(result.draft!.type, isNull);
     expect(result.draft!.category, isNull);
     expect(result.hasIssue('TYPE_CONFLICT'), isTrue);
+  });
+
+  test('具体收入长词优先于工资短词', () {
+    final result = parser.parse('退休工资3000');
+
+    expect(result.draft!.type, TransactionType.income);
+    expect(result.draft!.category, 'pension');
+  });
+
+  test('多个具体收入分类触发确认而不静默选择工资', () {
+    final result = parser.parse('工资和奖金8000');
+
+    expect(result.status, ParseStatus.needsConfirmation);
+    expect(result.draft!.type, TransactionType.income);
+    expect(result.draft!.category, 'other_income');
+    expect(result.hasIssue('CATEGORY_AMBIGUOUS'), isTrue);
+  });
+
+  test('贷款或借款到账不回退为收入', () {
+    for (final text in ['贷款到账10000', '借款到账5000']) {
+      final result = parser.parse(text);
+
+      expect(result.draft!.type, isNull, reason: text);
+      expect(result.draft!.category, isNull, reason: text);
+      expect(result.hasIssue('TYPE_UNKNOWN'), isTrue, reason: text);
+    }
+  });
+
+  test('退款不可直接记为支出或收入', () {
+    final result = parser.parse('退款买衣服200');
+
+    expect(result.draft!.type, isNull);
+    expect(result.draft!.category, isNull);
+    expect(result.hasIssue('TYPE_UNKNOWN'), isTrue);
   });
 
   test('original text is preserved exactly while note uses parse copy', () {

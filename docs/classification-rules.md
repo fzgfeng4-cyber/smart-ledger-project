@@ -19,7 +19,7 @@
 | --- | --- | --- |
 | amount_cents | 正整数分，或缺失时暂为 NULL | 金额以元输入、以分保存；大于 0；最多两位小数；不使用浮点数和负数表达方向。 |
 | type | expense、income，或无法判断时暂为 NULL | 最终只能是 expense 或 income，不加入退款、转账等第三种类型。 |
-| category | V1 规定的稳定内部 code，或未决时暂为 NULL/兜底 code | 只能使用 dining、groceries_food、daily_necessities、transportation、vehicle_fuel、housing、communication、entertainment、children、medical、other_expense、salary、other_income。 |
+| category | 固定分类的稳定内部 code，或未决时暂为 NULL/兜底 code | 只能使用 dining、groceries_food、daily_necessities、transportation、vehicle_fuel、housing、communication、entertainment、children、medical、clothing_beauty、education_learning、travel_vacation、gifts_social、pets、insurance、digital_appliances、fitness_sports、debt_repayment、taxes_fees、charity_donation、other_expense、salary、bonus、freelance、business_income、investment_income、rental_income、benefits_subsidies、pension、gift_red_envelope、other_income。 |
 | note | 有意义的普通文本，或 NULL | 去掉金额、日期词和无意义的句式骨架后生成；可为空；不新增商户字段。 |
 | original_text | 用户最开始输入的完整原文 | 原样保留，不把清理后的解析副本写回此字段。 |
 | transaction_date | YYYY-MM-DD，或日期非法/缺失时暂为 NULL | 未写日期按规则默认当前本机日期；未来日期不能直接保存。 |
@@ -124,8 +124,8 @@ type 只能是：
 
 | 方向 | 强提示词和典型词 | 处理原则 |
 | --- | --- | --- |
-| 支出 expense | 买、购买、花了、支付、付款、消费、支出、吃饭、吃面、早餐、午饭、晚饭、奶茶、咖啡、买菜、食品、水果、买东西、打车、公交、地铁、加油、停车、房租、话费、看病、挂号、买药、电影、游戏、买衣服 | 这些词表示已经发生消费或资金流出；结合分类表生成支出建议。 |
-| 收入 income | 工资、薪资、月薪、发工资、工资到账、奖金、分红、收入、收款、收到、到账、赚到、红包收入 | 这些词表示资金流入；“工资”优先到 salary，其他明确收入通常到 other_income。 |
+| 支出 expense | 买、购买、花了、支付、付款、消费、支出、吃饭、吃面、早餐、午饭、晚饭、奶茶、咖啡、买菜、食品、水果、买东西、打车、公交、地铁、加油、停车、话费、看病、挂号、买药、电影、游戏、衣服、教育、旅行、送礼、宠物、保险、手机、健身、还款、税费、捐款 | 这些词表示已经发生消费或资金流出；结合分类表生成支出建议。 |
+| 收入 income | 工资、薪资、月薪、发工资、工资到账、奖金、绩效奖金、年终奖、提成、兼职、劳务费、接单收入、经营收入、副业收入、分红、股息、投资收益、利息收入、理财收益、租金收入、收租、补贴、津贴、福利、补助、养老金、退休金、红包收入、收到红包、礼金到账、收入、收款、收到、到账、赚到 | 这些词表示资金流入；“工资”优先到 salary，明确奖金、兼职、经营、投资、租赁、补贴、养老金和红包/礼金分别建议对应固定收入分类，泛化收入词回退到 other_income 并提示确认。 |
 
 词表只用于可解释的规则命中，不把单个模糊词当作绝对真相。例如“收到”需要结合上下文；若同时出现收入和支出含义，则进入冲突处理。
 
@@ -148,7 +148,7 @@ type 只能是：
 
 ## 6. V1 完整分类规则表
 
-category 保存下表的内部 code，中文名称只用于展示和选择。除下表外不创建新 code。所有支出分类只能配合 type = expense，salary 和 other_income 只能配合 type = income。
+category 保存下表的内部 code，中文名称只用于展示和选择。除下表外不创建新 code。所有支出分类只能配合 type = expense，所有收入分类只能配合 type = income。
 
 | type | 内部 code | 中文名称 | 关键词和识别线索 | 典型示例 |
 | --- | --- | --- | --- | --- |
@@ -162,9 +162,28 @@ category 保存下表的内部 code，中文名称只用于展示和选择。除
 | expense | entertainment | 娱乐 | 电影、游戏、会员、演唱会、娱乐、唱歌、游玩、游戏充值 | 电影票60 |
 | expense | children | 孩子 | 给孩子、孩子、小孩、宝宝、娃、儿童用品、奶粉、尿布、孩子学费；前提是孩子是消费对象或明确受益人 | 给孩子买东西80 |
 | expense | medical | 医疗 | 医院、看病、挂号、门诊、药、买药、检查、治疗、体检、医疗 | 医院挂号20 |
-| expense | other_expense | 其他支出 | 已判断为支出但没有稳定命中前面分类的项目；这是兜底 code，不是新的自定义分类 | 买衣服200 |
+| expense | clothing_beauty | 服饰美容 | 衣服、服装、鞋子、鞋、化妆品、护肤、美容、理发、美发、美甲 | 买衣服200 |
+| expense | education_learning | 教育学习 | 教育、学费、培训、课程、学习、书籍、教材、考试、考证 | 培训费500 |
+| expense | travel_vacation | 旅行度假 | 旅行、旅游、度假、酒店、民宿、机票、景点、门票、出游 | 酒店住宿500 |
+| expense | gifts_social | 人情往来 | 送礼、礼物、礼金、随礼、份子钱、人情、婚礼、白事、发红包、给红包 | 随礼200 |
+| expense | pets | 宠物 | 宠物、猫粮、狗粮、猫砂、宠物医院、宠物美容 | 猫砂60 |
+| expense | insurance | 保险 | 保险、保费、车险、寿险、意外险、重疾险、商业保险 | 交车险800 |
+| expense | digital_appliances | 数码家电 | 手机、电脑、笔记本、平板、耳机、相机、家电、电器、电视、冰箱、洗衣机 | 买手机2000 |
+| expense | fitness_sports | 运动健身 | 健身、健身房、瑜伽、游泳、球馆、运动、体育、跑步 | 瑜伽300 |
+| expense | debt_repayment | 债务还款 | 还款、信用卡还款、还贷、贷款还款、分期还款 | 分期还款1000 |
+| expense | taxes_fees | 税费 | 税费、税款、个人所得税、个税、社保缴费、公积金缴费 | 交个税50 |
+| expense | charity_donation | 公益捐赠 | 捐款、捐赠、公益、慈善、募捐 | 募捐100 |
+| expense | other_expense | 其他支出 | 已判断为支出但没有稳定命中前面分类的项目；这是兜底 code，不是新的自定义分类 | 买东西200 |
 | income | salary | 工资 | 工资、薪资、月薪、发工资、工资到账、薪酬 | 8000工资 |
-| income | other_income | 其他收入 | 奖金、分红、兼职收入、收款、收到、到账、红包收入以及其他明确流入但不是工资的项目 | 奖金500 |
+| income | bonus | 奖金/绩效 | 奖金、绩效奖金、年终奖、提成 | 绩效奖金5000 |
+| income | freelance | 兼职/劳务 | 兼职收入、兼职、劳务费、劳务收入、接单收入 | 劳务费600 |
+| income | business_income | 经营收入 | 经营收入、营业收入、副业收入、生意收入 | 副业收入3000 |
+| income | investment_income | 投资收益 | 投资收益、分红、股息、利息收入、理财收益 | 股息收入50 |
+| income | rental_income | 租金收入 | 租金收入、收租、房租收入、租赁收入 | 租赁收入2000 |
+| income | benefits_subsidies | 补贴/福利 | 补贴、津贴、福利、补助 | 津贴500 |
+| income | pension | 养老金 | 养老金、退休金、退休工资 | 退休工资3000 |
+| income | gift_red_envelope | 红包/礼金 | 红包收入、收到红包、礼金到账、收到礼金 | 收到礼金200 |
+| income | other_income | 其他收入 | 收入、收款、收到、到账、赚到以及其他无法稳定命中具体收入分类的流入项目 | 收到一笔钱500 |
 
 分类词命中后仍要进行收支匹配：例如“工资”不能保存为 dining，“买菜”不能保存为 salary。用户在确认页把 type 改成另一方向时，必须重新选择与新方向匹配的分类。
 
@@ -403,7 +422,7 @@ Research 决策应把“规则覆盖规定样例 + 不确定时可修改”作�
 ### Backend Agent
 
 - 实现时复现本文件的确定性规则，并在 API 边界再次校验金额、方向、分类 code、备注长度、原文长度、有效日期和未来日期。
-- expense 只能配支出分类，income 只能配 salary 或 other_income；不得接受本表之外的 code。
+- expense 只能配支出分类，income 只能配收入分类；不得接受本表之外的 code。
 - 未确认草稿不写入 SQLite；保存只接受已经确认且字段完整的结果。
 - 多金额、0、负数、日期非法和方向冲突必须返回可理解的错误/提示，不静默修复。
 - 按 docs/data-model.md 保持正整数分、transaction_date 与创建时间分离、original_text 追溯不被普通编辑覆盖。
@@ -411,7 +430,7 @@ Research 决策应把“规则覆盖规定样例 + 不确定时可修改”作�
 
 ### Test Agent
 
-- 覆盖本文 20 个案例、所有 13 个分类 code、收入/支出与分类匹配，以及金额整数、小数一位/两位、裸数字和前后置关键词。
+- 覆盖本文 20 个案例、所有 32 个固定分类 code、收入/支出与分类匹配，以及金额整数、小数一位/两位、裸数字和前后置关键词。
 - 用可注入的本机日期验证今天、昨天、前天、当前年份月日、跨月跨年、非法日期和未来日期；不要把测试绑定到真实今天。
 - 验证多金额不自动拆分、不选择首个/最后一个、不自动求和；验证 0、负数、超过两位小数和极大金额边界。
 - 验证 original_text 与解析副本分离，note 去掉金额/日期词但保留有意义内容；验证空备注为 NULL。
@@ -420,7 +439,7 @@ Research 决策应把“规则覆盖规定样例 + 不确定时可修改”作�
 
 ### Review Agent
 
-- 逐项检查解析顺序、字段名、13 个 code、type 枚举、整数分和 YYYY-MM-DD 是否与数据模型一致。
+- 逐项检查解析顺序、字段名、32 个固定 code、type 枚举、整数分和 YYYY-MM-DD 是否与数据模型一致。
 - 优先检查错误记账风险：默认支出掩盖不确定性、负数翻转方向、日期数字误作金额、分类冲突按词序误判、收入分类配支出 code。
 - 检查是否存在直接保存、自动拆分、云端 AI 依赖、真实账目写入或新增 merchant、source、置信度等 V1 禁止字段。
 - 检查 original_text 是否被清理后的 note 覆盖，重复提醒是否错误阻止合法重复账。

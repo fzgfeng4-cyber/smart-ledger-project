@@ -39,7 +39,10 @@ void main() {
     expect(empty.hasText, isFalse);
     expect(success.status, OcrStatus.success);
     expect(success.recognizedText, '超市\n合计 35.00 元');
-    expect(OcrResult.fromMap(success.toMap()).recognizedText, success.recognizedText);
+    expect(
+      OcrResult.fromMap(success.toMap()).recognizedText,
+      success.recognizedText,
+    );
     expect(jsonEncode(success.toMap()), contains('recognized_text'));
   });
 
@@ -164,6 +167,29 @@ void main() {
       OcrResult.fromMap(permissionDenied.toMap()).failureReason!.message,
       permissionDenied.failureReason!.message,
     );
+  });
+
+  test('平台异常原文不会直接展示给用户', () {
+    const rawMessage =
+        "Attempt to invoke virtual method 'java.lang.Class java.lang.Object.getClass()' on a null object reference";
+    final result = OcrResult.fromMap({
+      'request_id': 'ocr-platform-error',
+      'source': const OcrImageSource(type: OcrImageSourceType.gallery).toMap(),
+      'status': OcrStatus.failed.code,
+      'recognized_text': '',
+      'blocks': const <Object?>[],
+      'confidence': null,
+      'candidate_issues': const <Object?>[],
+      'failure_reason': {
+        'code': OcrFailureCodes.recognitionFailed,
+        'message': rawMessage,
+        'retryable': true,
+      },
+      'completed_at': null,
+    });
+
+    expect(result.failureReason!.message, isNot(contains('java.lang.')));
+    expect(result.failureReason!.displayMessage, '本地 OCR 识别失败，请更换清晰图片后重试。');
   });
 }
 

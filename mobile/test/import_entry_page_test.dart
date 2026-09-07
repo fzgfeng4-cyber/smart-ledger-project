@@ -34,8 +34,10 @@ void main() {
     await tester.pumpWidget(SmartLedgerApp(controller: fixture.controller));
     await tester.pumpAndSettle();
 
-    expect(find.byKey(const Key('open-import-entry')), findsOneWidget);
-    await tester.tap(find.byKey(const Key('open-import-entry')));
+    expect(find.byKey(const Key('open-accounting-tools')), findsOneWidget);
+    await tester.tap(find.byKey(const Key('open-accounting-tools')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('accounting-tool-import')));
     await tester.pumpAndSettle();
 
     expect(find.byKey(const Key('import-entry-page')), findsOneWidget);
@@ -136,12 +138,17 @@ void main() {
       find.byKey(const Key('import-confirm-row-2')),
       160,
     );
-    await tester.drag(find.byKey(const Key('import-page')), const Offset(0, -80));
+    await tester.drag(
+      find.byKey(const Key('import-page')),
+      const Offset(0, -80),
+    );
     await tester.pump();
     await tester.tap(find.byKey(const Key('import-confirm-row-2')));
     await tester.pump();
     expect(
-      tester.widget<FilledButton>(find.byKey(const Key('import-submit'))).onPressed,
+      tester
+          .widget<FilledButton>(find.byKey(const Key('import-submit')))
+          .onPressed,
       isNotNull,
     );
     await tester.tap(find.byKey(const Key('import-submit')));

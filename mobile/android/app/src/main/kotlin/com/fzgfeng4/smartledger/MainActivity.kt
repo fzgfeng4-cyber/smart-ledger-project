@@ -11,6 +11,7 @@ import android.net.Uri
 import android.provider.MediaStore
 import android.provider.OpenableColumns
 import android.provider.Settings
+import android.util.Log
 import com.google.mlkit.vision.common.InputImage
 import com.google.mlkit.vision.text.Text
 import com.google.mlkit.vision.text.TextRecognition
@@ -276,13 +277,14 @@ class MainActivity : FlutterActivity() {
                     OCR_CAMERA_PERMISSION_REQUEST_CODE,
                 )
             } catch (error: Exception) {
+                logOcrFailure("request_camera_permission", error)
                 pendingOcrPicker = null
                 result.success(
                     failurePayload(
                         input = input,
                         status = "permission_denied",
                         code = "permission_denied",
-                        message = "无法请求相机权限：${error.message ?: "系统拒绝请求"}。",
+                        message = "无法请求相机权限，请稍后重试。",
                         retryable = false,
                     ),
                 )
@@ -306,6 +308,7 @@ class MainActivity : FlutterActivity() {
         try {
             startActivityForResult(intent, OCR_PICK_REQUEST_CODE)
         } catch (error: Exception) {
+            logOcrFailure("open_gallery_picker", error)
             if (pendingOcrPicker === pending) {
                 pendingOcrPicker = null
                 pending.result.success(
@@ -313,7 +316,7 @@ class MainActivity : FlutterActivity() {
                         input = pending.input,
                         status = "failed",
                         code = "provider_unavailable",
-                        message = "无法打开相册选择器：${error.message ?: "系统不支持图片选择"}。",
+                        message = "无法打开相册选择器，请稍后重试。",
                         retryable = true,
                     ),
                 )
@@ -325,6 +328,7 @@ class MainActivity : FlutterActivity() {
         val cameraFile = try {
             createCameraFile()
         } catch (error: Exception) {
+            logOcrFailure("create_camera_file", error)
             if (pendingOcrPicker === pending) {
                 pendingOcrPicker = null
                 pending.result.success(
@@ -332,7 +336,7 @@ class MainActivity : FlutterActivity() {
                         input = pending.input,
                         status = "failed",
                         code = "provider_unavailable",
-                        message = "无法准备相机临时文件：${error.message ?: "应用缓存不可用"}。",
+                        message = "无法准备相机临时文件，请稍后重试。",
                         retryable = true,
                     ),
                 )
@@ -350,6 +354,7 @@ class MainActivity : FlutterActivity() {
         try {
             startActivityForResult(intent, OCR_PICK_REQUEST_CODE)
         } catch (error: Exception) {
+            logOcrFailure("open_camera", error)
             if (pendingOcrPicker === pending) {
                 pendingOcrPicker = null
                 deleteCameraFile(cameraFile)
@@ -358,7 +363,7 @@ class MainActivity : FlutterActivity() {
                         input = pending.input,
                         status = "failed",
                         code = "provider_unavailable",
-                        message = "无法打开相机：${error.message ?: "系统不支持相机"}。",
+                        message = "无法打开相机，请检查相机权限后重试。",
                         retryable = true,
                     ),
                 )
@@ -503,7 +508,12 @@ class MainActivity : FlutterActivity() {
                     input = input,
                     status = "failed",
                     code = "invalid_input",
-                    message = error.message ?: "图片不存在或无法读取。",
+                    message = if (error is ImageInputException) {
+                        error.message ?: "图片不存在或无法读取。"
+                    } else {
+                        logOcrFailure("prepare_image", error)
+                        "图片不存在或无法读取，请重新选择清晰图片。"
+                    },
                     retryable = false,
                 ),
             )
@@ -515,13 +525,14 @@ class MainActivity : FlutterActivity() {
                 ChineseTextRecognizerOptions.Builder().build(),
             )
         } catch (error: Exception) {
+            logOcrFailure("initialize_recognizer", error)
             cleanupPreparedImage(preparedImage!!, input)
             result.success(
                 failurePayload(
                     input = input,
                     status = "failed",
                     code = "provider_unavailable",
-                    message = "无法初始化本地 OCR 引擎：${error.message ?: "模型不可用"}。",
+                    message = "本地 OCR 模型暂时不可用，请稍后重试。",
                     retryable = true,
                 ),
             )
@@ -548,7 +559,7 @@ class MainActivity : FlutterActivity() {
                             input = input,
                             status = "failed",
                             code = "recognition_failed",
-                            message = "本地 OCR 识别失败：${error.message ?: "识别引擎未返回结果"}。",
+                            message = recognitionFailureMessage(error),
                             retryable = true,
                         ),
                     )
@@ -560,7 +571,7 @@ class MainActivity : FlutterActivity() {
                     input = input,
                     status = "failed",
                     code = "recognition_failed",
-                    message = "本地 OCR 识别失败：${error.message ?: "识别引擎调用异常"}。",
+                    message = recognitionFailureMessage(error),
                     retryable = true,
                 ),
             )
@@ -840,8 +851,25 @@ class MainActivity : FlutterActivity() {
             if (error is ImageInputException) {
                 throw error
             }
-            throw ImageInputException(error.message ?: "图片不存在或无法读取。")
+            logOcrFailure("copy_image", error)
+            throw ImageInputException("图片不存在或无法读取。")
         }
+    }
+
+    private fun recognitionFailureMessage(error: Throwable): String {
+        logOcrFailure("recognition", error)
+        val detail = error.message?.lowercase(Locale.ROOT).orEmpty()
+        return when {
+            detail.contains("model") || detail.contains("module") ->
+                "本地 OCR 模型暂时不可用，请稍后重试。"
+            detail.contains("image") || detail.contains("bitmap") ->
+                "图片无法解析，请重新选择清晰图片后重试。"
+            else -> "本地 OCR 识别失败，请更换清晰图片后重试。"
+        }
+    }
+
+    private fun logOcrFailure(stage: String, error: Throwable) {
+        Log.e(OCR_LOG_TAG, "OCR $stage failed: ${error::class.java.name}", error)
     }
 
     private fun copyImageToFile(uri: Uri, target: File) {
@@ -976,6 +1004,7 @@ class MainActivity : FlutterActivity() {
     }
 
     companion object {
+        private const val OCR_LOG_TAG = "SmartLedgerOCR"
         private const val FILE_PICKER_CHANNEL = "smartledger/import_file"
         private const val OCR_CHANNEL = "smartledger/ocr"
         private const val PICK_CSV_REQUEST_CODE = 4107

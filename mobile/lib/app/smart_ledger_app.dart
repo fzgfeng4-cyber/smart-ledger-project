@@ -163,54 +163,129 @@ class _LedgerShellRoute extends StatelessWidget {
             top: false,
             left: false,
             right: false,
-            child: FloatingActionButton(
-              key: const Key('open-import-entry'),
-              heroTag: 'open-import-entry-hero',
-              tooltip: '导入 CSV 账单',
-              onPressed: () {
-                Navigator.of(context).pushNamed(AppRoutes.importEntry);
-              },
-              child: const Icon(Icons.file_open),
-            ),
-          ),
-        ),
-        Positioned(
-          right: 20,
-          bottom: 148,
-          child: SafeArea(
-            top: false,
-            left: false,
-            right: false,
-            child: FloatingActionButton.small(
-              key: const Key('open-ai-classification'),
-              heroTag: 'open-ai-classification-hero',
-              tooltip: 'AI 分类输入',
-              onPressed: () {
-                Navigator.of(context).pushNamed(AppRoutes.aiClassification);
-              },
-              child: const Icon(Icons.auto_awesome),
-            ),
-          ),
-        ),
-        Positioned(
-          right: 20,
-          bottom: 204,
-          child: SafeArea(
-            top: false,
-            left: false,
-            right: false,
-            child: FloatingActionButton.small(
-              key: const Key('open-ocr-entry'),
-              heroTag: 'open-ocr-entry-hero',
-              tooltip: '拍照识别账单',
-              onPressed: () {
-                Navigator.of(context).pushNamed(AppRoutes.ocr);
-              },
-              child: const Icon(Icons.document_scanner_outlined),
+            child: Semantics(
+              button: true,
+              label: '记账工具，打开拍照识别、智能分类和导入账单菜单',
+              child: FloatingActionButton.extended(
+                key: const Key('open-accounting-tools'),
+                heroTag: 'open-accounting-tools-hero',
+                tooltip: '记账工具',
+                onPressed: () => _showAccountingTools(context),
+                icon: const Icon(Icons.add_task),
+                label: const Text('记账工具'),
+              ),
             ),
           ),
         ),
       ],
+    );
+  }
+}
+
+void _showAccountingTools(BuildContext context) {
+  showModalBottomSheet<void>(
+    context: context,
+    showDragHandle: true,
+    builder: (sheetContext) {
+      return _AccountingToolsSheet(
+        onSelected: (routeName) {
+          Navigator.of(sheetContext).pop();
+          WidgetsBinding.instance.addPostFrameCallback((_) {
+            if (context.mounted) {
+              Navigator.of(context).pushNamed(routeName);
+            }
+          });
+        },
+      );
+    },
+  );
+}
+
+class _AccountingToolsSheet extends StatelessWidget {
+  const _AccountingToolsSheet({required this.onSelected});
+
+  final ValueChanged<String> onSelected;
+
+  @override
+  Widget build(BuildContext context) {
+    return SafeArea(
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Row(
+              children: [
+                Expanded(
+                  child: Text(
+                    '记账工具',
+                    style: Theme.of(context).textTheme.titleLarge
+                        ?.copyWith(fontWeight: FontWeight.w700),
+                  ),
+                ),
+                IconButton(
+                  key: const Key('accounting-tools-cancel'),
+                  tooltip: '取消',
+                  onPressed: () => Navigator.of(context).pop(),
+                  icon: const Icon(Icons.close),
+                ),
+              ],
+            ),
+            _ToolMenuItem(
+              key: const Key('accounting-tool-ocr'),
+              icon: Icons.document_scanner_outlined,
+              title: '拍照识别',
+              description: '拍摄或选择账单图片，在本机识别文字。',
+              onTap: () => onSelected(AppRoutes.ocr),
+            ),
+            _ToolMenuItem(
+              key: const Key('accounting-tool-ai-classification'),
+              icon: Icons.auto_awesome,
+              title: '智能分类',
+              description: '输入一笔账目，获得本地分类建议。',
+              onTap: () => onSelected(AppRoutes.aiClassification),
+            ),
+            _ToolMenuItem(
+              key: const Key('accounting-tool-import'),
+              icon: Icons.file_open,
+              title: '导入账单',
+              description: '选择支持的 CSV 账单文件，批量导入。',
+              onTap: () => onSelected(AppRoutes.importEntry),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _ToolMenuItem extends StatelessWidget {
+  const _ToolMenuItem({
+    required this.icon,
+    required this.title,
+    required this.description,
+    required this.onTap,
+    super.key,
+  });
+
+  final IconData icon;
+  final String title;
+  final String description;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return Semantics(
+      button: true,
+      label: '$title，$description',
+      child: ListTile(
+        leading: Icon(icon),
+        title: Text(title),
+        subtitle: Text(description),
+        contentPadding: const EdgeInsets.symmetric(horizontal: 4),
+        onTap: onTap,
+      ),
     );
   }
 }

@@ -128,6 +128,36 @@ void main() {
     expect(service.suggest('中国石化 0.01元').amountCents, 1);
   });
 
+  test('本地分类服务识别新增固定支出和收入分类', () {
+    final cases = {
+      '买衣服 120': ('clothing_beauty', TransactionType.expense),
+      '培训费 800': ('education_learning', TransactionType.expense),
+      '酒店住宿 500': ('travel_vacation', TransactionType.expense),
+      '随礼 200': ('gifts_social', TransactionType.expense),
+      '猫砂 60': ('pets', TransactionType.expense),
+      '买手机 2000': ('digital_appliances', TransactionType.expense),
+      '瑜伽 300': ('fitness_sports', TransactionType.expense),
+      '分期还款 1000': ('debt_repayment', TransactionType.expense),
+      '交个税 50': ('taxes_fees', TransactionType.expense),
+      '募捐 100': ('charity_donation', TransactionType.expense),
+      '绩效奖金 5000': ('bonus', TransactionType.income),
+      '劳务费 600': ('freelance', TransactionType.income),
+      '经营收入 3000': ('business_income', TransactionType.income),
+      '股息收入 50': ('investment_income', TransactionType.income),
+      '租赁收入 2000': ('rental_income', TransactionType.income),
+      '津贴 500': ('benefits_subsidies', TransactionType.income),
+      '退休工资 3000': ('pension', TransactionType.income),
+      '收到礼金 200': ('gift_red_envelope', TransactionType.income),
+    };
+
+    for (final entry in cases.entries) {
+      final result = service.suggest(entry.key);
+      expect(result.categoryCode, entry.value.$1, reason: entry.key);
+      expect(result.type, entry.value.$2, reason: entry.key);
+      expect(result.isFallback, isFalse, reason: entry.key);
+    }
+  });
+
   test('建议服务不依赖数据库、网络或正式入库对象', () {
     final sourcePaths = [
       'lib/domain/classification/local_classification_service.dart',
@@ -142,5 +172,22 @@ void main() {
     expect(source, isNot(contains('dio')));
     expect(source, isNot(contains('TransactionRepository')));
     expect(source, isNot(contains('Database')));
+  });
+
+  test('贷款到账不作为泛化收入建议', () {
+    final result = service.suggest('贷款到账 10000');
+
+    expect(result.type, isNull);
+    expect(result.categoryCode, isNull);
+    expect(result.status, LocalClassificationSuggestionStatus.needsInput);
+  });
+
+  test('退款不可回退为默认支出', () {
+    final result = service.suggest('退款买衣服 200');
+
+    expect(result.type, isNull);
+    expect(result.categoryCode, isNull);
+    expect(result.isFallback, isFalse);
+    expect(result.message, contains('退款'));
   });
 }

@@ -21,29 +21,66 @@ final class ClassificationService {
   const ClassificationService();
 
   List<String> findIncomeKeywords(String text) {
-    return _findKeywords(text, _incomeKeywords);
+    if (_isRefundText(text)) {
+      return const [];
+    }
+    final keywords = _findKeywords(text, _incomeKeywords);
+    if (!_isLoanDisbursementText(text)) {
+      return keywords;
+    }
+    return keywords
+        .where((keyword) => !_genericIncomeKeywords.contains(keyword))
+        .toList();
   }
 
   List<String> findExpenseKeywords(String text) {
+    if (_isRefundText(text)) {
+      return const [];
+    }
     return _findKeywords(text, _expenseKeywords);
   }
 
   List<String> categoryCandidates(String text) {
-    final candidates = <String>[];
+    if (_isRefundText(text)) {
+      return const [];
+    }
+    final matches = <_CategoryKeywordMatch>[];
     for (final rule in _categoryRules) {
-      if (rule.keywords.any(text.contains)) {
-        candidates.add(rule.code);
+      for (final keyword in rule.keywords) {
+        if (text.contains(keyword)) {
+          matches.add(_CategoryKeywordMatch(rule.code, keyword));
+        }
       }
     }
 
-    if (_salaryKeywords.any(text.contains)) {
+    final candidates = <String>[];
+    for (final match in matches) {
+      final shadowedByMoreSpecificMatch = matches.any(
+        (other) =>
+            other.code != match.code &&
+            match.keyword.length > 1 &&
+            other.keyword.length > match.keyword.length &&
+            other.keyword.contains(match.keyword),
+      );
+      if (!shadowedByMoreSpecificMatch) {
+        candidates.add(match.code);
+      }
+    }
+
+    if (_salaryKeywords.any(text.contains) &&
+        !_salaryKeywordIsCoveredByLongerIncomeKeyword(text)) {
       candidates.add('salary');
     }
-    if (_otherIncomeKeywords.any(text.contains)) {
+    if (!_isLoanDisbursementText(text) &&
+        _otherIncomeKeywords.any(text.contains)) {
       candidates.add('other_income');
     }
     return _unique(candidates);
   }
+
+  bool isRefundText(String text) => _isRefundText(text);
+
+  bool isLoanDisbursementText(String text) => _isLoanDisbursementText(text);
 
   CategorySelection chooseCategory({
     required TransactionType? type,
@@ -65,8 +102,22 @@ final class ClassificationService {
   }
 
   static CategorySelection _chooseIncomeCategory(List<String> matching) {
-    if (matching.contains('salary')) {
-      return CategorySelection(code: 'salary');
+    final specific = matching.where((code) => code != 'other_income').toList();
+    if (specific.length == 1) {
+      return CategorySelection(code: specific.first);
+    }
+    if (specific.length > 1) {
+      return CategorySelection(
+        code: 'other_income',
+        issues: [
+          ParseIssue(
+            code: 'CATEGORY_AMBIGUOUS',
+            field: 'category',
+            message: '这句话可能包含多个收入事项，请选择一笔账对应的分类。',
+            candidates: matching,
+          ),
+        ],
+      );
     }
     if (matching.length == 1) {
       if (matching.first == 'other_income') {
@@ -195,6 +246,21 @@ final class ClassificationService {
 
   static List<String> _findKeywords(String text, List<String> keywords) {
     return keywords.where(text.contains).toList();
+  }
+
+  static bool _salaryKeywordIsCoveredByLongerIncomeKeyword(String text) {
+    return _salaryKeywords.any(
+      (salaryKeyword) => _categoryRules.any(
+        (rule) =>
+            CategoryCatalog.isValidForType(TransactionType.income, rule.code) &&
+            rule.keywords.any(
+              (keyword) =>
+                  keyword.length > salaryKeyword.length &&
+                  keyword.contains(salaryKeyword) &&
+                  text.contains(keyword),
+            ),
+      ),
+    );
   }
 
   static List<String> _unique(List<String> values) {
@@ -329,6 +395,129 @@ const _categoryRules = <CategoryKeywordRule>[
     '医疗',
     '药',
   ]),
+  CategoryKeywordRule('clothing_beauty', [
+    '服饰美容',
+    '衣服',
+    '服装',
+    '鞋子',
+    '鞋',
+    '化妆品',
+    '护肤',
+    '美容',
+    '理发',
+    '美发',
+    '美甲',
+  ]),
+  CategoryKeywordRule('education_learning', [
+    '教育学习',
+    '教育',
+    '学费',
+    '培训',
+    '课程',
+    '学习',
+    '书籍',
+    '教材',
+    '考试',
+    '考证',
+  ]),
+  CategoryKeywordRule('travel_vacation', [
+    '旅行度假',
+    '旅行',
+    '旅游',
+    '度假',
+    '酒店',
+    '民宿',
+    '机票',
+    '景点',
+    '门票',
+    '出游',
+  ]),
+  CategoryKeywordRule('gifts_social', [
+    '人情往来',
+    '送礼',
+    '礼物',
+    '礼金',
+    '随礼',
+    '份子钱',
+    '人情',
+    '婚礼',
+    '白事',
+    '发红包',
+    '给红包',
+  ]),
+  CategoryKeywordRule('pets', ['宠物', '猫粮', '狗粮', '猫砂', '宠物医院', '宠物美容']),
+  CategoryKeywordRule('insurance', [
+    '保险',
+    '保费',
+    '车险',
+    '寿险',
+    '意外险',
+    '重疾险',
+    '商业保险',
+  ]),
+  CategoryKeywordRule('digital_appliances', [
+    '数码家电',
+    '手机',
+    '电脑',
+    '笔记本',
+    '平板',
+    '耳机',
+    '相机',
+    '家电',
+    '电器',
+    '电视',
+    '冰箱',
+    '洗衣机',
+  ]),
+  CategoryKeywordRule('fitness_sports', [
+    '运动健身',
+    '健身',
+    '健身房',
+    '瑜伽',
+    '游泳',
+    '球馆',
+    '运动',
+    '体育',
+    '跑步',
+  ]),
+  CategoryKeywordRule('debt_repayment', [
+    '债务还款',
+    '还款',
+    '信用卡还款',
+    '还贷',
+    '贷款还款',
+    '分期还款',
+  ]),
+  CategoryKeywordRule('taxes_fees', [
+    '税费',
+    '税款',
+    '个人所得税',
+    '个税',
+    '社保缴费',
+    '公积金缴费',
+  ]),
+  CategoryKeywordRule('charity_donation', [
+    '公益捐赠',
+    '捐款',
+    '捐赠',
+    '公益',
+    '慈善',
+    '募捐',
+  ]),
+  CategoryKeywordRule('bonus', ['奖金', '绩效奖金', '年终奖', '提成']),
+  CategoryKeywordRule('freelance', ['兼职收入', '兼职', '劳务费', '劳务收入', '接单收入']),
+  CategoryKeywordRule('business_income', ['经营收入', '营业收入', '副业收入', '生意收入']),
+  CategoryKeywordRule('investment_income', [
+    '投资收益',
+    '分红',
+    '股息',
+    '利息收入',
+    '理财收益',
+  ]),
+  CategoryKeywordRule('rental_income', ['租金收入', '收租', '房租收入', '租赁收入']),
+  CategoryKeywordRule('benefits_subsidies', ['补贴', '津贴', '福利', '补助']),
+  CategoryKeywordRule('pension', ['养老金', '退休金', '退休工资']),
+  CategoryKeywordRule('gift_red_envelope', ['红包收入', '收到红包', '礼金到账', '收到礼金']),
 ];
 
 const _incomeKeywords = <String>[
@@ -336,12 +525,41 @@ const _incomeKeywords = <String>[
   '发工资',
   '兼职收入',
   '红包收入',
+  '收到红包',
+  '礼金到账',
+  '收到礼金',
   '工资',
   '薪资',
   '月薪',
   '薪酬',
   '奖金',
+  '绩效奖金',
+  '年终奖',
+  '提成',
+  '兼职',
+  '劳务费',
+  '劳务收入',
+  '接单收入',
+  '经营收入',
+  '营业收入',
+  '副业收入',
+  '生意收入',
+  '投资收益',
   '分红',
+  '股息',
+  '利息收入',
+  '理财收益',
+  '租金收入',
+  '收租',
+  '房租收入',
+  '租赁收入',
+  '补贴',
+  '津贴',
+  '福利',
+  '补助',
+  '养老金',
+  '退休金',
+  '退休工资',
   '收款',
   '收到',
   '到账',
@@ -377,25 +595,123 @@ const _expenseKeywords = <String>[
   '地铁',
   '加油',
   '停车',
-  '房租',
   '话费',
   '看病',
   '挂号',
   '买药',
   '电影',
   '游戏',
+  '衣服',
+  '服装',
+  '鞋子',
+  '鞋',
+  '化妆品',
+  '护肤',
+  '美容',
+  '理发',
+  '美发',
+  '美甲',
+  '教育',
+  '学费',
+  '培训',
+  '课程',
+  '学习',
+  '书籍',
+  '教材',
+  '考试',
+  '考证',
+  '旅行',
+  '旅游',
+  '度假',
+  '酒店',
+  '民宿',
+  '机票',
+  '景点',
+  '门票',
+  '出游',
+  '送礼',
+  '礼物',
+  '随礼',
+  '份子钱',
+  '人情',
+  '婚礼',
+  '白事',
+  '发红包',
+  '给红包',
+  '宠物',
+  '猫粮',
+  '狗粮',
+  '猫砂',
+  '宠物医院',
+  '宠物美容',
+  '保险',
+  '保费',
+  '车险',
+  '寿险',
+  '意外险',
+  '重疾险',
+  '商业保险',
+  '手机',
+  '电脑',
+  '笔记本',
+  '平板',
+  '耳机',
+  '相机',
+  '家电',
+  '电器',
+  '电视',
+  '冰箱',
+  '洗衣机',
+  '健身',
+  '健身房',
+  '瑜伽',
+  '游泳',
+  '球馆',
+  '运动',
+  '体育',
+  '跑步',
+  '还款',
+  '信用卡还款',
+  '还贷',
+  '贷款还款',
+  '分期还款',
+  '税费',
+  '税款',
+  '个人所得税',
+  '个税',
+  '社保缴费',
+  '公积金缴费',
+  '捐款',
+  '捐赠',
+  '公益',
+  '慈善',
+  '募捐',
 ];
 
 const _salaryKeywords = <String>['工资到账', '发工资', '工资', '薪资', '月薪', '薪酬'];
 
-const _otherIncomeKeywords = <String>[
-  '奖金',
-  '分红',
-  '兼职收入',
-  '收款',
-  '收到',
-  '赚到',
-  '红包收入',
-  '收入',
-  '到账',
+const _otherIncomeKeywords = <String>['收款', '收到', '赚到', '收入', '到账'];
+
+const _genericIncomeKeywords = <String>{'收款', '收到', '赚到', '收入', '到账'};
+
+const _refundKeywords = <String>['退款', '退货退款', '退款到账', '退回款', '原路退回', '返还款'];
+
+const _loanDisbursementKeywords = <String>[
+  '贷款到账',
+  '借款到账',
+  '贷款放款',
+  '借款入账',
+  '借贷到账',
 ];
+
+bool _isRefundText(String text) => _refundKeywords.any(text.contains);
+
+bool _isLoanDisbursementText(String text) =>
+    _loanDisbursementKeywords.any(text.contains);
+
+final class _CategoryKeywordMatch {
+  const _CategoryKeywordMatch(this.code, this.keyword);
+
+  final String code;
+  final String keyword;
+}

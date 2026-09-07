@@ -15,7 +15,9 @@ import '../domain/classification/local_classification_suggestion.dart';
 import '../domain/models/ledger_transaction.dart';
 import '../domain/models/transaction_type.dart';
 import '../domain/search/transaction_search_query.dart';
+import '../domain/statistics/statistics_date_range.dart';
 import '../domain/statistics/statistics_summary.dart';
+import '../domain/statistics/statistics_time_series.dart';
 import '../domain/parser/batch_parse_result.dart';
 import '../domain/parser/multi_transaction_parser.dart';
 import '../domain/parser/parse_result.dart';
@@ -92,6 +94,7 @@ final class LedgerUiController extends ChangeNotifier {
   bool _budgetInitialized = false;
   bool _failNextLoadMore = false;
   bool _failNextRefresh = false;
+  bool _failNextStatisticsRefresh = false;
   bool _failNextBudgetRefresh = false;
   var _listStatus = LedgerListStatus.loading;
   String? _loadError;
@@ -104,6 +107,8 @@ final class LedgerUiController extends ChangeNotifier {
   String? _budgetFeedback;
   var _transactionSaveStatus = LedgerTransactionSaveStatus.idle;
   StatisticsSummary? _statisticsSummary;
+  StatisticsTimeSeries? _monthlyStatisticsTimeSeries;
+  StatisticsTimeSeries? _yearlyStatisticsTimeSeries;
   final List<BudgetCalculation> _budgetCalculations = [];
   EditorDraft? _draft;
   BatchParseResult? _batchDraft;
@@ -147,6 +152,12 @@ final class LedgerUiController extends ChangeNotifier {
       _transactionSaveStatus;
 
   StatisticsSummary? get statisticsSummary => _statisticsSummary;
+
+  StatisticsTimeSeries? get monthlyStatisticsTimeSeries =>
+      _monthlyStatisticsTimeSeries;
+
+  StatisticsTimeSeries? get yearlyStatisticsTimeSeries =>
+      _yearlyStatisticsTimeSeries;
 
   List<BudgetCalculation> get budgetCalculations {
     return List.unmodifiable(_budgetCalculations);
@@ -631,14 +642,17 @@ final class LedgerUiController extends ChangeNotifier {
     _statisticsError = null;
     notifyListeners();
     try {
-      _statisticsSummary = await repository.currentMonthStatistics();
+      await _loadStatisticsData();
     } catch (_) {
       _statisticsSummary = null;
+      _monthlyStatisticsTimeSeries = null;
+      _yearlyStatisticsTimeSeries = null;
       _statisticsError = '统计加载失败，请重试。';
     } finally {
       _isStatisticsBusy = false;
       _endOperation();
       notifyListeners();
+      _schedulePendingStatisticsRefresh();
     }
   }
 
@@ -769,6 +783,10 @@ final class LedgerUiController extends ChangeNotifier {
     _failNextRefresh = true;
   }
 
+  void failNextStatisticsRefreshForTest() {
+    _failNextStatisticsRefresh = true;
+  }
+
   void failNextBudgetRefreshForTest() {
     _failNextBudgetRefresh = true;
   }
@@ -799,7 +817,10 @@ final class LedgerUiController extends ChangeNotifier {
       _feedbackMessage = '已删除这笔账。';
       _draft = null;
       _startUndoExpiryTimer();
-      await _loadData(showBusyState: false);
+      final refreshed = await _loadData(showBusyState: false);
+      if (!refreshed) {
+        _feedbackMessage = '已删除这笔账，但列表或统计刷新失败，请重试。';
+      }
       return true;
     } catch (error) {
       _feedbackMessage = _toUserError(error);
@@ -828,7 +849,10 @@ final class LedgerUiController extends ChangeNotifier {
       _undoTimer?.cancel();
       _undoDeleteState = null;
       _feedbackMessage = '已恢复这笔账。';
-      await _loadData(showBusyState: false);
+      final refreshed = await _loadData(showBusyState: false);
+      if (!refreshed) {
+        _feedbackMessage = '已恢复这笔账，但列表或统计刷新失败，请重试。';
+      }
       return true;
     } catch (error) {
       _feedbackMessage = _toUserError(error);
@@ -922,7 +946,10 @@ final class LedgerUiController extends ChangeNotifier {
         await _syncSearchResults();
       }
       if (_statisticsInitialized) {
-        await _syncStatisticsIfInitialized();
+        final statisticsRefreshed = await _syncStatisticsIfInitialized();
+        if (!statisticsRefreshed) {
+          return false;
+        }
       }
       if (_budgetInitialized) {
         await _syncBudgetsIfInitialized();
@@ -937,6 +964,7 @@ final class LedgerUiController extends ChangeNotifier {
         _isBusy = false;
       }
       notifyListeners();
+      _schedulePendingStatisticsRefresh();
     }
   }
 
@@ -1101,22 +1129,73 @@ final class LedgerUiController extends ChangeNotifier {
     }
   }
 
-  Future<void> _syncStatisticsIfInitialized() async {
+  Future<bool> _syncStatisticsIfInitialized() async {
     if (!_statisticsInitialized) {
-      return;
+      return true;
     }
     if (_isStatisticsBusy) {
       _statisticsRefreshPending = true;
-      return;
+      return true;
     }
     _statisticsRefreshPending = false;
+    _isStatisticsBusy = true;
     try {
-      _statisticsSummary = await repository.currentMonthStatistics();
+      await _loadStatisticsData();
       _statisticsError = null;
+      return true;
     } catch (_) {
       _statisticsSummary = null;
+      _monthlyStatisticsTimeSeries = null;
+      _yearlyStatisticsTimeSeries = null;
       _statisticsError = '统计加载失败，请重试。';
+      return false;
+    } finally {
+      _isStatisticsBusy = false;
+      notifyListeners();
+      _schedulePendingStatisticsRefresh();
     }
+  }
+
+  void _schedulePendingStatisticsRefresh() {
+    if (!_statisticsRefreshPending || _disposed) {
+      return;
+    }
+    Future<void>.delayed(Duration.zero, () {
+      if (_disposed ||
+          !_statisticsRefreshPending ||
+          _isStatisticsBusy ||
+          isBusy ||
+          isBackupBusy) {
+        return;
+      }
+      unawaited(refreshStatistics());
+    });
+  }
+
+  Future<void> _loadStatisticsData() async {
+    if (_failNextStatisticsRefresh) {
+      _failNextStatisticsRefresh = false;
+      throw StateError('测试用统计加载失败');
+    }
+
+    final now = _clock.now();
+    final monthlyRange = StatisticsDateRange.month(now);
+    final yearlyRange = StatisticsDateRange.year(now);
+    final results = await Future.wait<Object>([
+      repository.currentMonthStatistics(),
+      repository.timeSeriesForDateRange(
+        monthlyRange,
+        unit: StatisticsBucketUnit.day,
+      ),
+      repository.timeSeriesForDateRange(
+        yearlyRange,
+        unit: StatisticsBucketUnit.month,
+      ),
+    ]);
+
+    _statisticsSummary = results[0] as StatisticsSummary;
+    _monthlyStatisticsTimeSeries = results[1] as StatisticsTimeSeries;
+    _yearlyStatisticsTimeSeries = results[2] as StatisticsTimeSeries;
   }
 
   Future<void> _loadBudgets({required bool showBusyState}) async {

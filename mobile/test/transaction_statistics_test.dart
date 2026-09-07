@@ -8,8 +8,10 @@ import 'package:smartledger/data/sqlite/database_schema.dart';
 import 'package:smartledger/data/sqlite/transaction_local_data_source.dart';
 import 'package:smartledger/domain/models/ledger_transaction.dart';
 import 'package:smartledger/domain/models/transaction_type.dart';
+import 'package:smartledger/domain/statistics/statistics_bucket_unit.dart';
 import 'package:smartledger/domain/statistics/statistics_date_range.dart';
 import 'package:smartledger/domain/statistics/statistics_summary.dart';
+import 'package:smartledger/domain/validation/transaction_validator.dart';
 import 'package:smartledger/shared/clock.dart';
 import 'package:sqflite_common_ffi/sqflite_ffi.dart';
 
@@ -20,6 +22,7 @@ void main() {
   late Database db;
   late MutableClock clock;
   late TransactionRepository repository;
+  var databaseClosed = false;
 
   setUp(() async {
     tempDir = await Directory.systemTemp.createTemp(
@@ -35,10 +38,13 @@ void main() {
       TransactionLocalDataSource(db),
       clock: clock,
     );
+    databaseClosed = false;
   });
 
   tearDown(() async {
-    await db.close();
+    if (!databaseClosed) {
+      await db.close();
+    }
     if (await tempDir.exists()) {
       await tempDir.delete(recursive: true);
     }
@@ -63,6 +69,62 @@ void main() {
     );
     expect(zeroSummary.expenseCategories.single.proportion, 0.0);
     expect(zeroSummary.expenseCategories.single.percentage, 0.0);
+  });
+
+  test('统计汇总拒绝非法日期范围且不访问 SQLite', () async {
+    await db.close();
+    databaseClosed = true;
+
+    final invalidRanges = [
+      _range('2026-8-01', '2026-09-01'),
+      _range('2026-08-01', '2026-9-01'),
+      _range('2026-02-30', '2026-03-01'),
+      _range('2026-08-01', '2026-08-01'),
+      _range('2026-09-01', '2026-08-01'),
+    ];
+
+    for (final range in invalidRanges) {
+      await expectLater(
+        repository.statisticsForDateRange(range),
+        throwsA(_invalidStatisticsRangeMatcher),
+      );
+    }
+  });
+
+  test('时间序列拒绝与统计汇总一致的非法日期范围且不先生成时间桶', () async {
+    await db.close();
+    databaseClosed = true;
+
+    for (final range in [
+      _range('2026-8-01', '2026-09-01'),
+      _range('2026-08-01', '2026-02-30'),
+      _range('2026-08-01', '2026-08-01'),
+      _range('2026-09-01', '2026-08-01'),
+    ]) {
+      await expectLater(
+        repository.timeSeriesForDateRange(
+          range,
+          unit: StatisticsBucketUnit.day,
+        ),
+        throwsA(_invalidStatisticsRangeMatcher),
+      );
+    }
+  });
+
+  test('日期桶直接入口对非法日期统一抛出统计校验异常', () {
+    final invalidRange = _range('2026-02-30', '2026-03-01');
+
+    expect(
+      () => invalidRange.bucketRanges(StatisticsBucketUnit.day),
+      throwsA(_invalidStatisticsRangeMatcher),
+    );
+    expect(
+      () => StatisticsDateRange.bucketKeyForDate(
+        '2026-02-30',
+        StatisticsBucketUnit.day,
+      ),
+      throwsA(_invalidStatisticsRangeMatcher),
+    );
   });
 
   test('多个分类按稳定 code 顺序聚合并从目录读取标签', () async {
@@ -247,11 +309,394 @@ void main() {
     expect(result.expenseTotalCents, 100);
     expect(result.expenseCategories.single.amountCents, 100);
   });
+
+  test('月度时间序列补齐每天空桶并按日期正序排列', () async {
+    await repository.create(
+      _newTransaction(amountCents: 100, transactionDate: '2026-08-01'),
+    );
+    await repository.create(
+      _newTransaction(
+        amountCents: 250,
+        type: TransactionType.income,
+        category: 'salary',
+        transactionDate: '2026-08-15',
+      ),
+    );
+    await repository.create(
+      _newTransaction(amountCents: 300, transactionDate: '2026-08-31'),
+    );
+
+    final result = await repository.timeSeriesForDateRange(
+      StatisticsDateRange.month(DateTime(2026, 8)),
+      unit: StatisticsBucketUnit.day,
+    );
+
+    expect(result.unit, StatisticsBucketUnit.day);
+    expect(result.buckets, hasLength(31));
+    expect(result.buckets.first.key, '2026-08-01');
+    expect(result.buckets.last.key, '2026-08-31');
+    expect(result.buckets[0].expenseTotalCents, 100);
+    expect(result.buckets[1].expenseTotalCents, 0);
+    expect(result.buckets[14].incomeTotalCents, 250);
+    expect(result.buckets[30].expenseTotalCents, 300);
+    expect(
+      result.buckets.map((bucket) => bucket.startDateInclusive).toList(),
+      orderedEquals(
+        List<String>.generate(
+          31,
+          (index) => '2026-08-${(index + 1).toString().padLeft(2, '0')}',
+        ),
+      ),
+    );
+  });
+
+  test('空月份返回完整的每日零元桶', () async {
+    final result = await repository.timeSeriesForDateRange(
+      StatisticsDateRange.month(DateTime(2026, 2)),
+      unit: StatisticsBucketUnit.day,
+    );
+
+    expect(result.buckets, hasLength(28));
+    expect(
+      result.buckets.map((bucket) => bucket.key),
+      List<String>.generate(
+        28,
+        (index) => '2026-02-${(index + 1).toString().padLeft(2, '0')}',
+      ),
+    );
+    expect(
+      result.buckets.every(
+        (bucket) =>
+            bucket.expenseTotalCents == 0 && bucket.incomeTotalCents == 0,
+      ),
+      isTrue,
+    );
+  });
+
+  test('空年份返回十二个月零元桶', () async {
+    final result = await repository.timeSeriesForDateRange(
+      StatisticsDateRange.year(DateTime(2025)),
+      unit: StatisticsBucketUnit.month,
+    );
+
+    expect(result.buckets, hasLength(12));
+    expect(
+      result.buckets.map((bucket) => bucket.key),
+      List<String>.generate(
+        12,
+        (index) => '2025-${(index + 1).toString().padLeft(2, '0')}',
+      ),
+    );
+    expect(
+      result.buckets.every(
+        (bucket) =>
+            bucket.expenseTotalCents == 0 && bucket.incomeTotalCents == 0,
+      ),
+      isTrue,
+    );
+  });
+
+  test('同一天的多笔支出在同一个 day 桶内精确合计', () async {
+    await repository.create(
+      _newTransaction(amountCents: 125, transactionDate: '2026-08-30'),
+    );
+    await repository.create(
+      _newTransaction(amountCents: 375, transactionDate: '2026-08-30'),
+    );
+
+    final result = await repository.timeSeriesForDateRange(
+      StatisticsDateRange.month(DateTime(2026, 8)),
+      unit: StatisticsBucketUnit.day,
+    );
+    final bucket = result.buckets.singleWhere(
+      (candidate) => candidate.key == '2026-08-30',
+    );
+
+    expect(bucket.expenseTotalCents, 500);
+    expect(bucket.incomeTotalCents, 0);
+  });
+
+  test('同一时间桶内收入和支出分别累计', () async {
+    await repository.create(
+      _newTransaction(amountCents: 125, transactionDate: '2026-08-20'),
+    );
+    await repository.create(
+      _newTransaction(
+        amountCents: 900,
+        type: TransactionType.income,
+        category: 'salary',
+        transactionDate: '2026-08-20',
+      ),
+    );
+
+    final result = await repository.timeSeriesForDateRange(
+      StatisticsDateRange.month(DateTime(2026, 8)),
+      unit: StatisticsBucketUnit.day,
+    );
+    final bucket = result.buckets.singleWhere(
+      (candidate) => candidate.key == '2026-08-20',
+    );
+
+    expect(bucket.expenseTotalCents, 125);
+    expect(bucket.incomeTotalCents, 900);
+  });
+
+  test('跨月日期不会混入同一个 month 桶', () async {
+    await repository.create(
+      _newTransaction(amountCents: 100, transactionDate: '2026-01-31'),
+    );
+    await repository.create(
+      _newTransaction(amountCents: 200, transactionDate: '2026-02-01'),
+    );
+
+    final result = await repository.timeSeriesForDateRange(
+      _range('2026-01-01', '2026-03-01'),
+      unit: StatisticsBucketUnit.month,
+    );
+
+    expect(result.buckets, hasLength(2));
+    expect(result.buckets[0].key, '2026-01');
+    expect(result.buckets[0].expenseTotalCents, 100);
+    expect(result.buckets[1].key, '2026-02');
+    expect(result.buckets[1].expenseTotalCents, 200);
+  });
+
+  test('跨年日期不会混入同一个 year 桶', () async {
+    await repository.create(
+      _newTransaction(amountCents: 100, transactionDate: '2025-12-31'),
+    );
+    await repository.create(
+      _newTransaction(
+        amountCents: 200,
+        type: TransactionType.income,
+        category: 'salary',
+        transactionDate: '2026-01-01',
+      ),
+    );
+
+    final result = await repository.timeSeriesForDateRange(
+      _range('2025-12-01', '2026-02-01'),
+      unit: StatisticsBucketUnit.year,
+    );
+
+    expect(result.buckets, hasLength(2));
+    expect(result.buckets[0].key, '2025');
+    expect(result.buckets[0].expenseTotalCents, 100);
+    expect(result.buckets[0].incomeTotalCents, 0);
+    expect(result.buckets[1].key, '2026');
+    expect(result.buckets[1].expenseTotalCents, 0);
+    expect(result.buckets[1].incomeTotalCents, 200);
+  });
+
+  test('缺少交易的日期或月份仍保留零元桶', () async {
+    await repository.create(
+      _newTransaction(amountCents: 100, transactionDate: '2026-01-15'),
+    );
+
+    final daily = await repository.timeSeriesForDateRange(
+      _range('2026-01-01', '2026-02-01'),
+      unit: StatisticsBucketUnit.day,
+    );
+    final monthly = await repository.timeSeriesForDateRange(
+      StatisticsDateRange.year(DateTime(2026)),
+      unit: StatisticsBucketUnit.month,
+    );
+
+    expect(
+      daily.buckets
+          .singleWhere((bucket) => bucket.key == '2026-01-14')
+          .expenseTotalCents,
+      0,
+    );
+    expect(
+      daily.buckets
+          .singleWhere((bucket) => bucket.key == '2026-01-15')
+          .expenseTotalCents,
+      100,
+    );
+    expect(
+      daily.buckets
+          .singleWhere((bucket) => bucket.key == '2026-01-16')
+          .expenseTotalCents,
+      0,
+    );
+    expect(
+      monthly.buckets
+          .singleWhere((bucket) => bucket.key == '2026-02')
+          .expenseTotalCents,
+      0,
+    );
+  });
+
+  test('大金额始终按整数分和 BigInt 累计，不产生浮点误差', () async {
+    const largeAmountCents = 9007199254740991;
+    await repository.create(
+      _newTransaction(
+        amountCents: largeAmountCents,
+        transactionDate: '2026-08-30',
+      ),
+    );
+    await repository.create(
+      _newTransaction(
+        amountCents: largeAmountCents,
+        transactionDate: '2026-08-30',
+      ),
+    );
+
+    final result = await repository.timeSeriesForDateRange(
+      StatisticsDateRange.month(DateTime(2026, 8)),
+      unit: StatisticsBucketUnit.day,
+    );
+    final bucket = result.buckets.singleWhere(
+      (candidate) => candidate.key == '2026-08-30',
+    );
+
+    expect(bucket.expenseTotalCents, 18014398509481982);
+  });
+
+  test('年度时间序列始终返回十二个月并按月份正序排列', () async {
+    await repository.create(
+      _newTransaction(amountCents: 100, transactionDate: '2026-01-05'),
+    );
+    await repository.create(
+      _newTransaction(
+        amountCents: 200,
+        type: TransactionType.income,
+        category: 'salary',
+        transactionDate: '2026-02-10',
+      ),
+    );
+    await repository.create(
+      _newTransaction(amountCents: 300, transactionDate: '2026-08-31'),
+    );
+
+    final result = await repository.timeSeriesForDateRange(
+      StatisticsDateRange.year(DateTime(2026, 8, 31)),
+      unit: StatisticsBucketUnit.month,
+    );
+
+    expect(result.range.startDateInclusive, '2026-01-01');
+    expect(result.range.endDateExclusive, '2027-01-01');
+    expect(result.buckets, hasLength(12));
+    expect(result.buckets.map((bucket) => bucket.key), [
+      '2026-01',
+      '2026-02',
+      '2026-03',
+      '2026-04',
+      '2026-05',
+      '2026-06',
+      '2026-07',
+      '2026-08',
+      '2026-09',
+      '2026-10',
+      '2026-11',
+      '2026-12',
+    ]);
+    expect(result.buckets[0].expenseTotalCents, 100);
+    expect(result.buckets[1].incomeTotalCents, 200);
+    expect(result.buckets[7].expenseTotalCents, 300);
+    expect(result.buckets[8].expenseTotalCents, 0);
+    expect(result.buckets.last.startDateInclusive, '2026-12-01');
+    expect(result.buckets.last.endDateExclusive, '2027-01-01');
+  });
+
+  test('时间序列沿用软删除、非法日期和未来日期过滤规则', () async {
+    final deleted = await repository.create(
+      _newTransaction(amountCents: 700, transactionDate: '2026-08-30'),
+    );
+    await repository.softDelete(deleted.id);
+    await repository.create(
+      _newTransaction(amountCents: 100, transactionDate: '2026-08-31'),
+    );
+    await db.insert(DatabaseSchema.transactionsTable, {
+      'amount_cents': 200,
+      'type': 'expense',
+      'category': 'dining',
+      'note': '非法日期',
+      'original_text': '非法日期账目',
+      'transaction_date': '2026-08-99',
+      'created_at': '2026-08-31T10:00:00Z',
+      'updated_at': '2026-08-31T10:00:00Z',
+      'deleted_at': null,
+    });
+    await db.insert(DatabaseSchema.transactionsTable, {
+      'amount_cents': 300,
+      'type': 'expense',
+      'category': 'dining',
+      'note': '未来日期',
+      'original_text': '未来日期账目',
+      'transaction_date': '2026-09-01',
+      'created_at': '2026-08-31T10:00:00Z',
+      'updated_at': '2026-08-31T10:00:00Z',
+      'deleted_at': null,
+    });
+
+    final result = await repository.timeSeriesForDateRange(
+      StatisticsDateRange.year(DateTime(2026)),
+      unit: StatisticsBucketUnit.month,
+    );
+
+    expect(
+      result.buckets
+          .singleWhere((bucket) => bucket.key == '2026-08')
+          .expenseTotalCents,
+      100,
+    );
+    expect(
+      result.buckets
+          .singleWhere((bucket) => bucket.key == '2026-09')
+          .expenseTotalCents,
+      0,
+    );
+  });
+
+  test('日期范围可生成 day、month、year 三种自然时间桶', () {
+    final range = StatisticsDateRange.fromDates(
+      startInclusive: DateTime(2025, 12, 15),
+      endExclusive: DateTime(2027, 2, 10),
+    );
+
+    final dayBuckets = range.bucketRanges(StatisticsBucketUnit.day);
+    final monthBuckets = range.bucketRanges(StatisticsBucketUnit.month);
+    final yearBuckets = range.bucketRanges(StatisticsBucketUnit.year);
+
+    expect(dayBuckets.first.key, '2025-12-15');
+    expect(dayBuckets.last.key, '2027-02-09');
+    expect(monthBuckets.map((bucket) => bucket.key), [
+      '2025-12',
+      '2026-01',
+      '2026-02',
+      '2026-03',
+      '2026-04',
+      '2026-05',
+      '2026-06',
+      '2026-07',
+      '2026-08',
+      '2026-09',
+      '2026-10',
+      '2026-11',
+      '2026-12',
+      '2027-01',
+      '2027-02',
+    ]);
+    expect(yearBuckets.map((bucket) => bucket.key), ['2025', '2026', '2027']);
+    expect(monthBuckets.first.startDateInclusive, '2025-12-15');
+    expect(monthBuckets.first.endDateExclusive, '2026-01-01');
+    expect(monthBuckets.last.startDateInclusive, '2027-02-01');
+    expect(monthBuckets.last.endDateExclusive, '2027-02-10');
+  });
 }
 
 StatisticsDateRange _range(String start, String end) {
   return StatisticsDateRange(startDateInclusive: start, endDateExclusive: end);
 }
+
+Matcher get _invalidStatisticsRangeMatcher =>
+    isA<TransactionValidationException>().having(
+      (error) => error.message,
+      'message',
+      '统计日期范围无效',
+    );
 
 NewLedgerTransaction _newTransaction({
   int amountCents = 3500,

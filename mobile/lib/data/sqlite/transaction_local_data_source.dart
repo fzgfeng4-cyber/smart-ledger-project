@@ -4,6 +4,8 @@ import '../../domain/budget/budget.dart';
 import '../../domain/import/import_batch_record.dart';
 import '../../domain/models/ledger_transaction.dart';
 import '../../domain/models/transaction_type.dart';
+import '../../domain/statistics/statistics_bucket_unit.dart';
+import '../../domain/statistics/statistics_date_range.dart';
 import '../../shared/clock.dart';
 import '../statistics/transaction_statistics_data.dart';
 import 'database_schema.dart';
@@ -459,6 +461,74 @@ AND transaction_date < ?
           (category) => TransactionCategoryAmount(
             categoryCode: category,
             amountCents: _bigIntToInteger(categoryTotals[category]!),
+          ),
+        ),
+      );
+    });
+  }
+
+  Future<TransactionStatisticsTimeSeriesData> queryStatisticsTimeSeries({
+    required String startDateInclusive,
+    required String endDateExclusive,
+    required StatisticsBucketUnit unit,
+  }) async {
+    return _db.transaction((transaction) async {
+      final rows = await transaction.query(
+        DatabaseSchema.transactionsTable,
+        columns: const ['type', 'transaction_date', 'amount_cents'],
+        where:
+            '''
+deleted_at IS NULL
+AND $_validTransactionDateSql
+AND transaction_date >= ?
+AND transaction_date < ?
+''',
+        whereArgs: [startDateInclusive, endDateExclusive],
+        orderBy: 'transaction_date ASC, id ASC',
+      );
+
+      final expenseTotals = <String, BigInt>{};
+      final incomeTotals = <String, BigInt>{};
+      for (final row in rows) {
+        final amount = BigInt.from(_readInteger(row['amount_cents']));
+        final type = row['type'];
+        final transactionDate = row['transaction_date'];
+        if (type is! String || transactionDate is! String) {
+          throw StateError('时间序列记录的 type 或 transaction_date 不是字符串');
+        }
+
+        final key = StatisticsDateRange.bucketKeyForDate(transactionDate, unit);
+        if (type == TransactionType.expense.code) {
+          expenseTotals.update(
+            key,
+            (current) => current + amount,
+            ifAbsent: () => amount,
+          );
+        } else if (type == TransactionType.income.code) {
+          incomeTotals.update(
+            key,
+            (current) => current + amount,
+            ifAbsent: () => amount,
+          );
+        } else {
+          throw StateError('时间序列记录包含未知收支类型: $type');
+        }
+      }
+
+      final bucketRanges = StatisticsDateRange(
+        startDateInclusive: startDateInclusive,
+        endDateExclusive: endDateExclusive,
+      ).bucketRanges(unit);
+      return TransactionStatisticsTimeSeriesData(
+        buckets: bucketRanges.map(
+          (bucketRange) => TransactionStatisticsBucketData(
+            key: bucketRange.key,
+            expenseTotalCents: _bigIntToInteger(
+              expenseTotals[bucketRange.key] ?? BigInt.zero,
+            ),
+            incomeTotalCents: _bigIntToInteger(
+              incomeTotals[bucketRange.key] ?? BigInt.zero,
+            ),
           ),
         ),
       );

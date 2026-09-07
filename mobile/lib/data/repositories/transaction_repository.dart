@@ -1,7 +1,9 @@
 import '../../domain/models/ledger_transaction.dart';
 import '../../domain/models/transaction_type.dart';
+import '../../domain/statistics/statistics_bucket_unit.dart';
 import '../../domain/statistics/statistics_date_range.dart';
 import '../../domain/statistics/statistics_summary.dart';
+import '../../domain/statistics/statistics_time_series.dart';
 import '../../domain/validation/transaction_validator.dart';
 import '../../shared/clock.dart';
 import '../sqlite/transaction_local_data_source.dart';
@@ -143,6 +145,7 @@ final class TransactionRepository {
   Future<StatisticsSummary> statisticsForDateRange(
     StatisticsDateRange range,
   ) async {
+    range.validate();
     final data = await _dataSource.queryStatistics(
       startDateInclusive: range.startDateInclusive,
       endDateExclusive: _clampEndDateExclusive(range.endDateExclusive),
@@ -162,6 +165,35 @@ final class TransactionRepository {
 
   Future<StatisticsSummary> currentMonthStatistics() {
     return statisticsForDateRange(StatisticsDateRange.month(_clock.now()));
+  }
+
+  Future<StatisticsTimeSeries> timeSeriesForDateRange(
+    StatisticsDateRange range, {
+    required StatisticsBucketUnit unit,
+  }) async {
+    range.validate();
+    final bucketRanges = range.bucketRanges(unit);
+    if (bucketRanges.isEmpty) {
+      return StatisticsTimeSeries(range: range, unit: unit, buckets: const []);
+    }
+
+    final data = await _dataSource.queryStatisticsTimeSeries(
+      startDateInclusive: range.startDateInclusive,
+      endDateExclusive: _clampEndDateExclusive(range.endDateExclusive),
+      unit: unit,
+    );
+    final dataByKey = {for (final bucket in data.buckets) bucket.key: bucket};
+    final buckets = bucketRanges.map((bucketRange) {
+      final bucketData = dataByKey[bucketRange.key];
+      return StatisticsTimeBucket(
+        key: bucketRange.key,
+        startDateInclusive: bucketRange.startDateInclusive,
+        endDateExclusive: bucketRange.endDateExclusive,
+        expenseTotalCents: bucketData?.expenseTotalCents ?? 0,
+        incomeTotalCents: bucketData?.incomeTotalCents ?? 0,
+      );
+    });
+    return StatisticsTimeSeries(range: range, unit: unit, buckets: buckets);
   }
 
   Future<int> todayExpenseCents() {

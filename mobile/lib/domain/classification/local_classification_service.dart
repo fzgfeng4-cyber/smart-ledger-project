@@ -106,7 +106,11 @@ final class LocalClassificationService {
               CategoryCatalog.isValidForType(TransactionType.expense, code),
         );
 
-    if (!hasIncomeEvidence && !hasExpenseEvidence && _hasDescription(text)) {
+    if (!hasIncomeEvidence &&
+        !hasExpenseEvidence &&
+        _hasDescription(text) &&
+        !_classificationService.isRefundText(text) &&
+        !_classificationService.isLoanDisbursementText(text)) {
       hasExpenseEvidence = true;
       ruleHits.add(
         const ClassificationRuleHit(
@@ -137,6 +141,8 @@ final class LocalClassificationService {
       type = TransactionType.income;
     } else if (hasExpenseEvidence) {
       type = TransactionType.expense;
+    } else if (_classificationService.isRefundText(text)) {
+      messages.add('退款记录不可直接入账，请确认原交易或使用退款处理流程。');
     } else {
       messages.add('无法判断收支方向，请补充商户或事项。');
     }

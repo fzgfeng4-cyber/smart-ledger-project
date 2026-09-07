@@ -6,9 +6,12 @@ import 'package:smartledger/data/repositories/transaction_repository.dart';
 import 'package:smartledger/data/sqlite/app_database.dart';
 import 'package:smartledger/data/sqlite/database_schema.dart';
 import 'package:smartledger/data/sqlite/transaction_local_data_source.dart';
+import 'package:smartledger/domain/budget/budget.dart';
+import 'package:smartledger/domain/budget/budget_validator.dart';
 import 'package:smartledger/domain/categories/category_catalog.dart';
 import 'package:smartledger/domain/models/ledger_transaction.dart';
 import 'package:smartledger/domain/models/transaction_type.dart';
+import 'package:smartledger/domain/statistics/statistics_date_range.dart';
 import 'package:smartledger/domain/validation/transaction_validator.dart';
 import 'package:smartledger/shared/clock.dart';
 import 'package:sqflite_common_ffi/sqflite_ffi.dart';
@@ -74,7 +77,7 @@ void main() {
     );
   });
 
-  test('category catalog keeps frozen V1 codes by type', () {
+  test('分类目录保留旧 code 并包含新增固定分类', () {
     expect(
       CategoryCatalog.forType(TransactionType.expense)
           .map((category) => category.code)
@@ -90,6 +93,17 @@ void main() {
         'entertainment',
         'children',
         'medical',
+        'clothing_beauty',
+        'education_learning',
+        'travel_vacation',
+        'gifts_social',
+        'pets',
+        'insurance',
+        'digital_appliances',
+        'fitness_sports',
+        'debt_repayment',
+        'taxes_fees',
+        'charity_donation',
         'other_expense',
       }),
     );
@@ -97,8 +111,89 @@ void main() {
       CategoryCatalog.forType(TransactionType.income)
           .map((category) => category.code)
           .toSet(),
-      equals(<String>{'salary', 'other_income'}),
+      equals(<String>{
+        'salary',
+        'bonus',
+        'freelance',
+        'business_income',
+        'investment_income',
+        'rental_income',
+        'benefits_subsidies',
+        'pension',
+        'gift_red_envelope',
+        'other_income',
+      }),
     );
+  });
+
+  test('新增分类可进入预算、统计名称映射和 Repository 保存路径', () async {
+    const newExpenseCategories = <String, String>{
+      'clothing_beauty': '服饰美容',
+      'education_learning': '教育学习',
+      'travel_vacation': '旅行度假',
+      'gifts_social': '人情往来',
+      'pets': '宠物',
+      'insurance': '保险',
+      'digital_appliances': '数码家电',
+      'fitness_sports': '运动健身',
+      'debt_repayment': '债务还款',
+      'taxes_fees': '税费',
+      'charity_donation': '公益捐赠',
+    };
+
+    var amount = 100;
+    for (final categoryCode in newExpenseCategories.keys) {
+      BudgetValidator.validateCreate(
+        NewBudget(
+          categoryCode: categoryCode,
+          month: '2026-08',
+          amountCents: 10000,
+        ),
+      );
+      await repository.create(
+        _newTransaction(
+          amountCents: amount,
+          category: categoryCode,
+          note: newExpenseCategories[categoryCode],
+          originalText: newExpenseCategories[categoryCode]!,
+        ),
+      );
+      amount += 100;
+    }
+
+    final result = await repository.statisticsForDateRange(
+      const StatisticsDateRange(
+        startDateInclusive: '2026-08-01',
+        endDateExclusive: '2026-09-01',
+      ),
+    );
+
+    expect(result.expenseCategories.map((category) => category.code), [
+      'charity_donation',
+      'clothing_beauty',
+      'debt_repayment',
+      'digital_appliances',
+      'education_learning',
+      'fitness_sports',
+      'gifts_social',
+      'insurance',
+      'pets',
+      'taxes_fees',
+      'travel_vacation',
+    ]);
+    expect(result.expenseCategories.map((category) => category.label), [
+      '公益捐赠',
+      '服饰美容',
+      '债务还款',
+      '数码家电',
+      '教育学习',
+      '运动健身',
+      '人情往来',
+      '保险',
+      '宠物',
+      '税费',
+      '旅行度假',
+    ]);
   });
 
   test('create stores integer cents and preserves original text', () async {

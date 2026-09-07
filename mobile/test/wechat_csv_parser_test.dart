@@ -55,6 +55,40 @@ void main() {
     expect(row.suggestedCategoryCode, 'salary');
   });
 
+  test('新增固定分类从微信商品和交易类型字段生成匹配建议', () {
+    const csv = '''交易时间,收支,交易对方,金额(元),商品,当前状态,交易单号
+2026-08-31,支出,服装店,120.00,买衣服,交易成功,CLOTH-1
+2026-08-31,支出,培训机构,500.00,培训费,交易成功,EDU-1
+2026-08-31,支出,保险公司,800.00,保费,交易成功,INS-1
+2026-08-31,支出,酒店,200.00,酒店住宿,交易成功,TRAVEL-1
+2026-08-31,收入,公司,500.00,绩效奖金,交易成功,BONUS-1
+2026-08-31,收入,亲友,260.00,礼金到账,交易成功,GIFT-1
+''';
+
+    final rows = parser.parse(csv).candidateRows;
+
+    expect(rows.map((row) => row.suggestedCategoryCode), [
+      'clothing_beauty',
+      'education_learning',
+      'insurance',
+      'travel_vacation',
+      'bonus',
+      'gift_red_envelope',
+    ]);
+    expect(
+      rows
+          .take(4)
+          .every((row) => row.transactionType == TransactionType.expense),
+      isTrue,
+    );
+    expect(
+      rows
+          .skip(4)
+          .every((row) => row.transactionType == TransactionType.income),
+      isTrue,
+    );
+  });
+
   test('收入、退款和失败状态不会默认为普通支出', () {
     final csv =
         '交易时间,交易类型,收/支,金额(元),交易对方,商品,当前状态,交易单号\n'

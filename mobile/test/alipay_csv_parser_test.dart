@@ -173,6 +173,40 @@ void main() {
     expect(row.note, contains('第一行\n第二行'));
   });
 
+  test('新增固定分类从支付宝分类和商品字段生成匹配建议', () {
+    const csv = '''交易时间,交易分类,收/支,金额,交易对方,商品说明,交易订单号,资金状态
+2026-08-31,服饰美容,支出,120.00,服装店,买衣服,CLOTH-1,交易成功
+2026-08-31,教育学习,支出,500.00,培训机构,培训费,EDU-1,交易成功
+2026-08-31,保险,支出,800.00,保险公司,保费,INS-1,交易成功
+2026-08-31,旅行度假,支出,200.00,酒店,酒店住宿,TRAVEL-1,交易成功
+2026-08-31,奖金/绩效,收入,500.00,公司,绩效奖金,BONUS-1,交易成功
+2026-08-31,红包/礼金,收入,260.00,亲友,礼金到账,GIFT-1,交易成功
+''';
+
+    final rows = parser.parse(csv).rows;
+
+    expect(rows.map((row) => row.suggestedCategoryCode), [
+      'clothing_beauty',
+      'education_learning',
+      'insurance',
+      'travel_vacation',
+      'bonus',
+      'gift_red_envelope',
+    ]);
+    expect(
+      rows
+          .take(4)
+          .every((row) => row.transactionType == TransactionType.expense),
+      isTrue,
+    );
+    expect(
+      rows
+          .skip(4)
+          .every((row) => row.transactionType == TransactionType.income),
+      isTrue,
+    );
+  });
+
   test('UTF-8 字节损坏时拒绝静默替换', () {
     expect(
       () => parser.parseBytes([0xE4, 0xB8]),

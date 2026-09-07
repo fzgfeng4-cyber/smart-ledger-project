@@ -97,6 +97,25 @@ void main() {
     expect(await fixture.repository.list(), hasLength(2));
   });
 
+  test('保存后统计刷新失败会标记为刷新失败而不是伪装成功', () async {
+    await fixture.controller.refreshStatistics();
+
+    fixture.controller.startCreateBlank();
+    fixture.controller.updateAmountText('12.00');
+    fixture.controller.updateType(TransactionType.expense);
+    fixture.controller.updateCategory('dining');
+    fixture.controller.failNextStatisticsRefreshForTest();
+
+    expect(await fixture.controller.saveDraft(), isTrue);
+    expect(
+      fixture.controller.transactionSaveStatus,
+      LedgerTransactionSaveStatus.savedWithRefreshFailure,
+    );
+    expect(fixture.controller.statisticsError, isNotNull);
+    expect(fixture.controller.draft, isNull);
+    expect(await fixture.repository.list(), hasLength(1));
+  });
+
   test('统计刷新在首页忙碌期间触发不会被丢弃', () async {
     final refresh = fixture.controller.refresh();
     final statisticsRefresh = fixture.controller.refreshStatistics();
@@ -105,5 +124,97 @@ void main() {
 
     expect(fixture.controller.statisticsSummary, isNotNull);
     expect(fixture.controller.isStatisticsBusy, isFalse);
+  });
+
+  test('统计初始化加载完整时间序列并按时间正序排列', () async {
+    await fixture.seed(
+      amountCents: 7000,
+      category: 'dining',
+      transactionDate: '2026-01-15',
+    );
+    await fixture.seed(
+      amountCents: 3000,
+      category: 'groceries_food',
+      transactionDate: '2026-08-31',
+    );
+    await fixture.seed(
+      amountCents: 5000,
+      type: TransactionType.income,
+      category: 'salary',
+      transactionDate: '2026-08-31',
+    );
+
+    await fixture.controller.refreshStatistics();
+
+    final monthly = fixture.controller.monthlyStatisticsTimeSeries;
+    final yearly = fixture.controller.yearlyStatisticsTimeSeries;
+    expect(monthly, isNotNull);
+    expect(monthly!.buckets, hasLength(31));
+    expect(monthly.buckets.first.key, '2026-08-01');
+    expect(monthly.buckets.last.key, '2026-08-31');
+    expect(monthly.buckets.last.expenseTotalCents, 3000);
+    expect(monthly.buckets.last.incomeTotalCents, 5000);
+    expect(yearly, isNotNull);
+    expect(yearly!.buckets, hasLength(12));
+    expect(yearly.buckets.first.key, '2026-01');
+    expect(yearly.buckets.last.key, '2026-12');
+    expect(yearly.buckets.first.expenseTotalCents, 7000);
+    expect(yearly.buckets[7].expenseTotalCents, 3000);
+  });
+
+  test('保存、编辑、删除和撤销后已初始化统计会刷新', () async {
+    await fixture.controller.refreshStatistics();
+
+    fixture.controller.startCreateBlank();
+    fixture.controller.updateAmountText('12.00');
+    fixture.controller.updateType(TransactionType.expense);
+    fixture.controller.updateCategory('dining');
+    expect(await fixture.controller.saveDraft(), isTrue);
+    expect(
+      fixture
+          .controller
+          .monthlyStatisticsTimeSeries!
+          .buckets
+          .last
+          .expenseTotalCents,
+      1200,
+    );
+
+    final savedEntry = fixture.controller.visibleEntries.single;
+    fixture.controller.startEditing(savedEntry);
+    fixture.controller.updateAmountText('20.00');
+    expect(await fixture.controller.saveDraft(), isTrue);
+    expect(
+      fixture
+          .controller
+          .monthlyStatisticsTimeSeries!
+          .buckets
+          .last
+          .expenseTotalCents,
+      2000,
+    );
+
+    fixture.controller.startEditing(fixture.controller.visibleEntries.single);
+    expect(await fixture.controller.deleteCurrentEntry(), isTrue);
+    expect(
+      fixture
+          .controller
+          .monthlyStatisticsTimeSeries!
+          .buckets
+          .last
+          .expenseTotalCents,
+      0,
+    );
+
+    expect(await fixture.controller.undoDelete(), isTrue);
+    expect(
+      fixture
+          .controller
+          .monthlyStatisticsTimeSeries!
+          .buckets
+          .last
+          .expenseTotalCents,
+      2000,
+    );
   });
 }

@@ -53,8 +53,31 @@ class _HomePageState extends State<HomePage> {
                 children: [
                   const AppTopBar(title: 'Smart Ledger'),
                   const SizedBox(height: 16),
+                  _SearchCard(
+                    textController: _searchController,
+                    statusText: controller.searchStatusMessage,
+                    statusIsError: controller.searchError != null,
+                    isBusy: controller.isBusy || controller.isBackupBusy,
+                    isSearching: controller.isSearching,
+                  ),
+                  const SizedBox(height: 14),
                   _StatsRow(controller: controller),
                   const SizedBox(height: 18),
+                  _BudgetSummarySection(
+                    month: controller.budgetMonth,
+                    calculations: controller.budgetCalculations,
+                    isBusy: controller.isBudgetBusy,
+                    errorMessage: controller.budgetError,
+                    onOpenBudget: () =>
+                        Navigator.of(context).pushNamed(AppRoutes.budget),
+                    onRetry: () => unawaited(controller.refreshBudgets()),
+                  ),
+                  const SizedBox(height: 18),
+                  _QuickInputCard(
+                    textController: _quickInputController,
+                    errorText: controller.quickInputError,
+                  ),
+                  const SizedBox(height: 22),
                   if (hasActiveSearch)
                     _SearchResultsSection(
                       controller: controller,
@@ -68,29 +91,6 @@ class _HomePageState extends State<HomePage> {
                       controller: controller,
                       recentEntries: recentEntries,
                     ),
-                  const SizedBox(height: 22),
-                  _BudgetSummarySection(
-                    month: controller.budgetMonth,
-                    calculations: controller.budgetCalculations,
-                    isBusy: controller.isBudgetBusy,
-                    errorMessage: controller.budgetError,
-                    onOpenBudget: () =>
-                        Navigator.of(context).pushNamed(AppRoutes.budget),
-                    onRetry: () => unawaited(controller.refreshBudgets()),
-                  ),
-                  const SizedBox(height: 22),
-                  _SearchCard(
-                    textController: _searchController,
-                    statusText: controller.searchStatusMessage,
-                    statusIsError: controller.searchError != null,
-                    isBusy: controller.isBusy || controller.isBackupBusy,
-                    isSearching: controller.isSearching,
-                  ),
-                  const SizedBox(height: 18),
-                  _QuickInputCard(
-                    textController: _quickInputController,
-                    errorText: controller.quickInputError,
-                  ),
                 ],
               ),
             ),
@@ -694,103 +694,79 @@ class _SearchCard extends StatelessWidget {
     final controller = context.read<LedgerUiController>();
     final canSubmit = !isBusy && !isSearching;
 
-    return DecoratedBox(
-      decoration: BoxDecoration(
-        color: Theme.of(context).colorScheme.surfaceContainer,
-        borderRadius: BorderRadius.circular(8),
-      ),
-      child: Padding(
-        padding: const EdgeInsets.all(14),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(
-              '搜索账目',
-              style: Theme.of(context).textTheme.titleMedium
-                  ?.copyWith(fontWeight: FontWeight.w700),
-            ),
-            const SizedBox(height: 10),
-            LayoutBuilder(
-              builder: (context, constraints) {
-                final input = TextField(
-                  key: const Key('search-input'),
-                  controller: textController,
-                  textInputAction: TextInputAction.search,
-                  minLines: 1,
-                  maxLines: 1,
-                  decoration: const InputDecoration(
-                    hintText: '搜索账目',
-                    filled: true,
-                    prefixIcon: Icon(Icons.search),
+    return Semantics(
+      container: true,
+      label: '搜索账目',
+      child: DecoratedBox(
+        key: const Key('home-search-card'),
+        decoration: BoxDecoration(
+          color: Theme.of(context).colorScheme.surfaceContainer,
+          borderRadius: BorderRadius.circular(8),
+        ),
+        child: Padding(
+          padding: const EdgeInsets.all(8),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Row(
+                children: [
+                  Expanded(
+                    child: ValueListenableBuilder<TextEditingValue>(
+                      valueListenable: textController,
+                      builder: (context, value, _) {
+                        return TextField(
+                          key: const Key('search-input'),
+                          controller: textController,
+                          textInputAction: TextInputAction.search,
+                          minLines: 1,
+                          maxLines: 1,
+                          decoration: InputDecoration(
+                            hintText: '搜索账目',
+                            filled: true,
+                            isDense: true,
+                            prefixIcon: const Icon(Icons.search),
+                            suffixIcon: IconButton(
+                              key: const Key('search-clear'),
+                              tooltip: '清除搜索',
+                              onPressed: canSubmit && value.text.isNotEmpty
+                                  ? () => _clear(context, controller)
+                                  : null,
+                              icon: const Icon(Icons.close),
+                            ),
+                            contentPadding: const EdgeInsets.symmetric(
+                              horizontal: 12,
+                              vertical: 10,
+                            ),
+                          ),
+                          onSubmitted: (_) => _submit(context, controller),
+                        );
+                      },
+                    ),
                   ),
-                  onSubmitted: (_) => _submit(context, controller),
-                );
-                final searchButton = FilledButton.icon(
-                  key: const Key('search-submit'),
-                  onPressed: canSubmit
-                      ? () => _submit(context, controller)
-                      : null,
-                  icon: const Icon(Icons.search),
-                  label: const Text('搜索'),
-                );
-                final clearButton = OutlinedButton.icon(
-                  key: const Key('search-clear'),
-                  onPressed: canSubmit
-                      ? () => _clear(context, controller)
-                      : null,
-                  icon: const Icon(Icons.close),
-                  label: const Text('清除'),
-                );
-
-                if (constraints.maxWidth < 420) {
-                  return Column(
-                    crossAxisAlignment: CrossAxisAlignment.stretch,
-                    children: [
-                      input,
-                      const SizedBox(height: 10),
-                      SizedBox(height: 48, child: searchButton),
-                      const SizedBox(height: 8),
-                      SizedBox(height: 44, child: clearButton),
-                    ],
-                  );
-                }
-
-                return Column(
-                  crossAxisAlignment: CrossAxisAlignment.stretch,
-                  children: [
-                    Row(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Expanded(child: input),
-                        const SizedBox(width: 10),
-                        SizedBox(width: 104, height: 56, child: searchButton),
-                      ],
-                    ),
-                    const SizedBox(height: 8),
-                    Align(
-                      alignment: Alignment.centerLeft,
-                      child: SizedBox(
-                        width: 104,
-                        height: 44,
-                        child: clearButton,
-                      ),
-                    ),
-                  ],
-                );
-              },
-            ),
-            if (statusText != null) ...[
-              const SizedBox(height: 8),
-              Text(
-                statusText!,
-                style: TextStyle(
-                  color: statusIsError
-                      ? Theme.of(context).colorScheme.error
-                      : Theme.of(context).colorScheme.onSurfaceVariant,
-                ),
+                  const SizedBox(width: 8),
+                  IconButton.filled(
+                    key: const Key('search-submit'),
+                    tooltip: '搜索',
+                    onPressed: canSubmit
+                        ? () => _submit(context, controller)
+                        : null,
+                    icon: const Icon(Icons.search),
+                  ),
+                ],
               ),
+              if (statusText != null) ...[
+                const SizedBox(height: 6),
+                Text(
+                  statusText!,
+                  style: TextStyle(
+                    color: statusIsError
+                        ? Theme.of(context).colorScheme.error
+                        : Theme.of(context).colorScheme.onSurfaceVariant,
+                  ),
+                ),
+              ],
             ],
-          ],
+          ),
         ),
       ),
     );

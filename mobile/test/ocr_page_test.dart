@@ -176,7 +176,9 @@ void main() {
       );
       await tester.pumpAndSettle();
 
-      await tester.tap(find.byKey(const Key('open-ocr-entry')));
+      await tester.tap(find.byKey(const Key('open-accounting-tools')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const Key('accounting-tool-ocr')));
       await tester.pumpAndSettle();
       await tester.tap(find.byKey(const Key('ocr-gallery-button')));
       await tester.pumpAndSettle();
@@ -214,7 +216,9 @@ void main() {
       );
       await tester.pumpAndSettle();
 
-      await tester.tap(find.byKey(const Key('open-ocr-entry')));
+      await tester.tap(find.byKey(const Key('open-accounting-tools')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const Key('accounting-tool-ocr')));
       await tester.pumpAndSettle();
       await tester.tap(find.byKey(const Key('ocr-camera-button')));
       await tester.pumpAndSettle();

@@ -54,6 +54,7 @@ class _EditorScaffold extends StatelessWidget {
     }
 
     final validationMessage = controller.validationMessage;
+    final keyboardBottomInset = MediaQuery.viewInsetsOf(context).bottom;
     return Scaffold(
       appBar: AppBar(
         leading: IconButton(
@@ -113,8 +114,8 @@ class _EditorScaffold extends StatelessWidget {
                                 if (!context.mounted) {
                                   return;
                                 }
-                                final deleted =
-                                    await controller.deleteCurrentEntry();
+                                final deleted = await controller
+                                    .deleteCurrentEntry();
                                 if (deleted && context.mounted) {
                                   Navigator.of(context).pop();
                                 }
@@ -122,8 +123,7 @@ class _EditorScaffold extends StatelessWidget {
                         icon: const Icon(Icons.delete_outline),
                         label: const Text('删除账目'),
                         style: OutlinedButton.styleFrom(
-                          foregroundColor:
-                              Theme.of(context).colorScheme.error,
+                          foregroundColor: Theme.of(context).colorScheme.error,
                         ),
                       ),
                     ],
@@ -136,7 +136,12 @@ class _EditorScaffold extends StatelessWidget {
       ),
       bottomNavigationBar: SafeArea(
         child: Padding(
-          padding: const EdgeInsets.fromLTRB(16, 8, 16, 16),
+          padding: EdgeInsets.fromLTRB(
+            16,
+            8,
+            16,
+            keyboardBottomInset > 0 ? 8 : 16,
+          ),
           child: Column(
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -224,7 +229,9 @@ class _IssuePanel extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final issues = draft.unresolvedIssues;
+    final issues = draft.unresolvedIssues
+        .where((issue) => issue.field != 'category')
+        .toList(growable: false);
     if (issues.isEmpty) {
       return const SizedBox.shrink();
     }
@@ -284,39 +291,6 @@ class _IssueItem extends StatelessWidget {
               onPressed: () => controller.acknowledgeIssue(issue.code),
               icon: const Icon(Icons.check_circle_outline),
               label: const Text('已核对金额'),
-            ),
-          if (issue.code == 'CATEGORY_CONFLICT')
-            Wrap(
-              spacing: 8,
-              runSpacing: 8,
-              children: [
-                FilledButton.tonalIcon(
-                  key: const Key('keep-dining'),
-                  onPressed: () => controller.updateCategory('dining'),
-                  icon: const Icon(Icons.restaurant),
-                  label: const Text('保留餐饮'),
-                ),
-                OutlinedButton.icon(
-                  key: const Key('change-to-children'),
-                  onPressed: () => controller.updateCategory('children'),
-                  icon: const Icon(Icons.child_care),
-                  label: const Text('改为孩子'),
-                ),
-              ],
-            ),
-          if (issue.code == 'CATEGORY_FALLBACK')
-            TextButton.icon(
-              key: const Key('acknowledge-category'),
-              onPressed: () => controller.acknowledgeIssue(issue.code),
-              icon: const Icon(Icons.check_circle_outline),
-              label: const Text('确认当前分类'),
-            ),
-          if (issue.code == 'LOCAL_CLASSIFICATION_SUGGESTION')
-            TextButton.icon(
-              key: const Key('acknowledge-local-classification'),
-              onPressed: () => controller.acknowledgeIssue(issue.code),
-              icon: const Icon(Icons.check_circle_outline),
-              label: const Text('确认本地分类建议'),
             ),
           if (issue.code == 'MULTIPLE_AMOUNTS')
             Wrap(
@@ -424,12 +398,14 @@ class _CategoryField extends StatelessWidget {
   Widget build(BuildContext context) {
     final controller = context.watch<LedgerUiController>();
     final options = controller.categoryOptions;
+    final currentDraft = controller.draft ?? draft;
     return Column(
       key: const Key('category-field'),
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         Text('分类', style: Theme.of(context).textTheme.labelLarge),
         const SizedBox(height: 8),
+        _CategoryReviewPanel(draft: currentDraft),
         if (options.isEmpty)
           const Text('请先选择收入或支出')
         else
@@ -441,7 +417,7 @@ class _CategoryField extends StatelessWidget {
                   (category) => ChoiceChip(
                     key: Key('category-${category.code}'),
                     label: Text(category.label),
-                    selected: draft.category == category.code,
+                    selected: currentDraft.category == category.code,
                     onSelected: enabled
                         ? (_) => controller.updateCategory(category.code)
                         : null,
@@ -451,6 +427,121 @@ class _CategoryField extends StatelessWidget {
           ),
       ],
     );
+  }
+}
+
+class _CategoryReviewPanel extends StatelessWidget {
+  const _CategoryReviewPanel({required this.draft});
+
+  final EditorDraft draft;
+
+  @override
+  Widget build(BuildContext context) {
+    final categoryIssues = draft.issues
+        .where((issue) => issue.field == 'category')
+        .toList(growable: false);
+    final unresolved = categoryIssues
+        .where((issue) => !draft.acknowledgedIssueCodes.contains(issue.code))
+        .toList(growable: false);
+    if (categoryIssues.isEmpty) {
+      return const SizedBox.shrink();
+    }
+
+    final controller = context.read<LedgerUiController>();
+    if (unresolved.isEmpty) {
+      return Padding(
+        padding: const EdgeInsets.only(bottom: 10),
+        child: Semantics(
+          label: '分类已确认：${categoryLabel(draft.category)}',
+          child: Text(
+            '已确认：${categoryLabel(draft.category)}',
+            key: const Key('category-confirmed'),
+            style: TextStyle(
+              color: Theme.of(context).colorScheme.primary,
+              fontWeight: FontWeight.w600,
+            ),
+          ),
+        ),
+      );
+    }
+
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 10),
+      child: DecoratedBox(
+        key: const Key('category-review-panel'),
+        decoration: BoxDecoration(
+          color: Theme.of(context).colorScheme.tertiaryContainer,
+          borderRadius: BorderRadius.circular(8),
+        ),
+        child: Padding(
+          padding: const EdgeInsets.all(12),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                '分类确认',
+                style: Theme.of(context).textTheme.titleSmall
+                    ?.copyWith(fontWeight: FontWeight.w700),
+              ),
+              const SizedBox(height: 4),
+              Text('当前分类：${categoryLabel(draft.category)}'),
+              const SizedBox(height: 8),
+              ...unresolved.expand(
+                (issue) => _categoryIssueWidgets(context, issue, controller),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  List<Widget> _categoryIssueWidgets(
+    BuildContext context,
+    UiIssue issue,
+    LedgerUiController controller,
+  ) {
+    final widgets = <Widget>[Text(issue.message), const SizedBox(height: 8)];
+    if (issue.code == 'CATEGORY_CONFLICT' && issue.candidates.isNotEmpty) {
+      widgets.add(
+        Wrap(
+          spacing: 8,
+          runSpacing: 8,
+          children: issue.candidates
+              .map(
+                (code) => OutlinedButton(
+                  key: Key('category-suggestion-$code'),
+                  onPressed: () => controller.updateCategory(code),
+                  child: Text('改为${categoryLabel(code)}'),
+                ),
+              )
+              .toList(),
+        ),
+      );
+    } else if (issue.code == 'CATEGORY_FALLBACK') {
+      widgets.add(
+        TextButton.icon(
+          key: const Key('acknowledge-category'),
+          onPressed: () => controller.acknowledgeIssue(issue.code),
+          icon: const Icon(Icons.check_circle_outline),
+          label: const Text('确认当前分类'),
+        ),
+      );
+    } else if (issue.code == 'LOCAL_CLASSIFICATION_SUGGESTION') {
+      final suggestionCode = issue.candidates.isEmpty
+          ? draft.category
+          : issue.candidates.first;
+      widgets.add(
+        FilledButton.tonalIcon(
+          key: const Key('acknowledge-local-classification'),
+          onPressed: () => controller.acknowledgeIssue(issue.code),
+          icon: const Icon(Icons.check_circle_outline),
+          label: Text('确认建议：${categoryLabel(suggestionCode)}'),
+        ),
+      );
+    }
+    widgets.add(const SizedBox(height: 4));
+    return widgets;
   }
 }
 

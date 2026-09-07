@@ -211,6 +211,67 @@ void main() {
     );
   });
 
+  test('新增固定分类的交易和预算导出后恢复 code 与数据保持一致', () async {
+    final clothing = await repository.create(
+      _newTransaction(
+        amountCents: 12000,
+        category: 'clothing_beauty',
+        note: '服饰美容',
+        originalText: '买衣服120',
+      ),
+    );
+    final investment = await repository.create(
+      _newTransaction(
+        amountCents: 3000,
+        type: TransactionType.income,
+        category: 'investment_income',
+        note: '利息收入',
+        originalText: '利息收入30',
+      ),
+    );
+    final budget = await budgetDataSource.insert(
+      const NewBudget(
+        categoryCode: 'clothing_beauty',
+        month: '2026-08',
+        amountCents: 50000,
+      ),
+      now: clock.now(),
+    );
+
+    final backup = await backupService.exportBackup();
+    await database.close();
+    await File(databasePath).delete();
+    database = await AppDatabase.openAtPath(
+      databasePath,
+      databaseFactory: databaseFactoryFfi,
+    );
+    dataSource = TransactionLocalDataSource(database);
+    budgetDataSource = BudgetLocalDataSource(database);
+    repository = TransactionRepository(dataSource, clock: clock);
+    backupService = BackupService(
+      dataSource: dataSource,
+      budgetDataSource: budgetDataSource,
+      clock: clock,
+      backupDirectoryPath: path.join(tempDir.path, 'backups'),
+    );
+
+    final restored = await backupService.importBackup(backup.filePath);
+    expect(restored.transactionCount, 2);
+    expect(restored.budgetCount, 1);
+    expect(
+      (await dataSource.findById(clothing.id))!.category,
+      'clothing_beauty',
+    );
+    expect(
+      (await dataSource.findById(investment.id))!.category,
+      'investment_income',
+    );
+    expect(
+      (await budgetDataSource.findById(budget.id))!.categoryCode,
+      'clothing_beauty',
+    );
+  });
+
   test('导入批次随备份恢复后再次导入仍被幂等拦截', () async {
     const csv = '''支付宝交易记录明细
 交易时间,交易分类,收/支,金额,交易对方,商品说明,交易订单号,资金状态
@@ -220,10 +281,7 @@ void main() {
       fileName: '支付宝账单.csv',
       bytes: utf8.encode(csv),
     );
-    final coordinator = ImportCoordinator(
-      repository: repository,
-      clock: clock,
-    );
+    final coordinator = ImportCoordinator(repository: repository, clock: clock);
     final batch = await coordinator.parsePickedFile(
       ImportSourceType.alipayCsv,
       importedFile,

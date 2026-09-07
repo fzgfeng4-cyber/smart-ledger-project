@@ -10,6 +10,30 @@ import 'package:sqflite_common_ffi/sqflite_ffi.dart';
 void main() {
   sqfliteFfiInit();
 
+  const newExpenseCategories = [
+    'clothing_beauty',
+    'education_learning',
+    'travel_vacation',
+    'gifts_social',
+    'pets',
+    'insurance',
+    'digital_appliances',
+    'fitness_sports',
+    'debt_repayment',
+    'taxes_fees',
+    'charity_donation',
+  ];
+  const newIncomeCategories = [
+    'bonus',
+    'freelance',
+    'business_income',
+    'investment_income',
+    'rental_income',
+    'benefits_subsidies',
+    'pension',
+    'gift_red_envelope',
+  ];
+
   late Directory tempDir;
   late Database db;
 
@@ -28,6 +52,165 @@ void main() {
     if (await tempDir.exists()) {
       await tempDir.delete(recursive: true);
     }
+  });
+
+  test('V4 支持全部新增支出分类，不允许收入分类做预算', () async {
+    for (var index = 0; index < newExpenseCategories.length; index += 1) {
+      final category = newExpenseCategories[index];
+      await db.insert(DatabaseSchema.budgetsTable, {
+        'category_code': category,
+        'month': '2026-${(index + 1).toString().padLeft(2, '0')}',
+        'amount_cents': 100,
+        'enabled': 1,
+        'created_at': '2026-09-01T00:00:00Z',
+        'updated_at': '2026-09-01T00:00:00Z',
+      });
+      await db.insert(DatabaseSchema.transactionsTable, {
+        'amount_cents': 100,
+        'type': 'expense',
+        'category': category,
+        'note': null,
+        'original_text': '新分类测试',
+        'transaction_date': '2026-09-01',
+        'created_at': '2026-09-01T00:00:00Z',
+        'updated_at': '2026-09-01T00:00:00Z',
+        'deleted_at': null,
+      });
+    }
+
+    for (final category in newIncomeCategories) {
+      await db.insert(DatabaseSchema.transactionsTable, {
+        'amount_cents': 100,
+        'type': 'income',
+        'category': category,
+        'note': null,
+        'original_text': '新增收入分类测试',
+        'transaction_date': '2026-09-01',
+        'created_at': '2026-09-01T00:00:00Z',
+        'updated_at': '2026-09-01T00:00:00Z',
+        'deleted_at': null,
+      });
+    }
+
+    await expectLater(
+      db.insert(DatabaseSchema.budgetsTable, {
+        'category_code': 'bonus',
+        'month': '2027-01',
+        'amount_cents': 100,
+        'enabled': 1,
+        'created_at': '2026-09-01T00:00:00Z',
+        'updated_at': '2026-09-01T00:00:00Z',
+      }),
+      throwsA(isA<DatabaseException>()),
+    );
+  });
+
+  test('V3 升级 V4 保持数据、索引、约束并重建分类触发器', () async {
+    await db.close();
+    final databasePath = path.join(tempDir.path, 'v3.sqlite');
+    final v3 = await databaseFactoryFfi.openDatabase(
+      databasePath,
+      options: OpenDatabaseOptions(
+        version: 3,
+        onCreate: (database, _) async {
+          await database.execute('''
+CREATE TABLE transactions (
+  id INTEGER PRIMARY KEY,
+  amount_cents INTEGER NOT NULL CHECK (amount_cents > 0),
+  type TEXT NOT NULL CHECK (type IN ('expense', 'income')),
+  category TEXT NOT NULL,
+  note TEXT,
+  original_text TEXT NOT NULL,
+  transaction_date TEXT NOT NULL,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  deleted_at TEXT
+)
+''');
+          await database.execute(
+            'CREATE INDEX idx_transactions_date_status ON transactions (transaction_date, deleted_at)',
+          );
+          await database.execute('''
+CREATE TABLE budgets (
+  id INTEGER PRIMARY KEY,
+  category_code TEXT NOT NULL CHECK (category_code IN ('dining', 'other_expense')),
+  month TEXT NOT NULL,
+  amount_cents INTEGER NOT NULL,
+  enabled INTEGER NOT NULL DEFAULT 1,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  UNIQUE(category_code, month)
+)
+''');
+          await database.execute(
+            'CREATE INDEX idx_budgets_month_enabled ON budgets (month, enabled)',
+          );
+          await database.execute('''
+CREATE TRIGGER trg_transactions_type_category_insert
+BEFORE INSERT ON transactions
+FOR EACH ROW WHEN NEW.type = 'expense' AND NEW.category NOT IN ('dining', 'other_expense')
+BEGIN SELECT RAISE(ABORT, 'category does not match type'); END
+''');
+          await database.execute('''
+CREATE TRIGGER trg_transactions_type_category_update
+BEFORE UPDATE OF type, category ON transactions
+FOR EACH ROW WHEN NEW.type = 'expense' AND NEW.category NOT IN ('dining', 'other_expense')
+BEGIN SELECT RAISE(ABORT, 'category does not match type'); END
+''');
+        },
+      ),
+    );
+    await v3.insert('transactions', {
+      'id': 7,
+      'amount_cents': 3580,
+      'type': 'expense',
+      'category': 'dining',
+      'note': '旧账目',
+      'original_text': '旧账目',
+      'transaction_date': '2026-09-01',
+      'created_at': '2026-09-01T00:00:00Z',
+      'updated_at': '2026-09-01T00:00:00Z',
+      'deleted_at': '2026-09-02T00:00:00Z',
+    });
+    await v3.insert('budgets', {
+      'id': 9,
+      'category_code': 'dining',
+      'month': '2026-09',
+      'amount_cents': 5000,
+      'enabled': 0,
+      'created_at': '2026-09-01T00:00:00Z',
+      'updated_at': '2026-09-01T00:00:00Z',
+    });
+    await v3.close();
+
+    db = await AppDatabase.openAtPath(
+      databasePath,
+      databaseFactory: databaseFactoryFfi,
+    );
+    expect(await db.getVersion(), 4);
+    expect((await db.query('transactions')).single['id'], 7);
+    expect(
+      (await db.query('transactions')).single['deleted_at'],
+      '2026-09-02T00:00:00Z',
+    );
+    expect((await db.query('budgets')).single, containsPair('id', 9));
+    expect((await db.query('budgets')).single, containsPair('enabled', 0));
+    expect(
+      (await db.rawQuery('PRAGMA index_list(budgets)'))
+          .map((row) => row['name']),
+      contains('idx_budgets_month_enabled'),
+    );
+    await db.insert('transactions', {
+      'amount_cents': 100,
+      'type': 'income',
+      'category': 'bonus',
+      'note': null,
+      'original_text': '奖金',
+      'transaction_date': '2026-09-03',
+      'created_at': '2026-09-03T00:00:00Z',
+      'updated_at': '2026-09-03T00:00:00Z',
+      'deleted_at': null,
+    });
   });
 
   test('空数据库直接创建 V2.6 schema', () async {
@@ -203,6 +386,202 @@ ON transactions (transaction_date, deleted_at)
     );
     await expectLater(
       db.insert(DatabaseSchema.budgetsTable, base),
+      throwsA(isA<DatabaseException>()),
+    );
+  });
+
+  test('V3 升级到 V4 保留数据、索引、唯一约束并启用新增固定分类', () async {
+    await db.close();
+    final databasePath = path.join(tempDir.path, 'v3.sqlite');
+    final v3 = await databaseFactoryFfi.openDatabase(
+      databasePath,
+      options: OpenDatabaseOptions(
+        version: 3,
+        onConfigure: (database) async {
+          await database.execute('PRAGMA foreign_keys = ON');
+        },
+        onCreate: (database, _) async {
+          await database.execute('''
+CREATE TABLE transactions (
+  id INTEGER PRIMARY KEY,
+  amount_cents INTEGER NOT NULL CHECK (amount_cents > 0),
+  type TEXT NOT NULL CHECK (type IN ('expense', 'income')),
+  category TEXT NOT NULL,
+  note TEXT CHECK (note IS NULL OR length(note) <= 200),
+  original_text TEXT NOT NULL,
+  transaction_date TEXT NOT NULL,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  deleted_at TEXT
+)
+''');
+          await database.execute('''
+CREATE INDEX idx_transactions_date_status
+ON transactions (transaction_date, deleted_at)
+''');
+          await database.execute('''
+CREATE TABLE budgets (
+  id INTEGER PRIMARY KEY,
+  category_code TEXT NOT NULL CHECK (category_code IN (
+    'dining', 'groceries_food', 'daily_necessities', 'transportation',
+    'vehicle_fuel', 'housing', 'communication', 'entertainment',
+    'children', 'medical', 'other_expense'
+  )),
+  month TEXT NOT NULL,
+  amount_cents INTEGER NOT NULL,
+  enabled INTEGER NOT NULL DEFAULT 1,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  UNIQUE(category_code, month)
+)
+''');
+          await database.execute('''
+CREATE INDEX idx_budgets_month_enabled
+ON budgets (month, enabled)
+''');
+          await database.execute('''
+CREATE TRIGGER trg_transactions_type_category_insert
+BEFORE INSERT ON transactions
+FOR EACH ROW
+WHEN NEW.type = 'expense' AND NEW.category NOT IN ('dining')
+BEGIN
+  SELECT RAISE(ABORT, 'category does not match type');
+END
+''');
+          await database.execute('''
+CREATE TRIGGER trg_transactions_type_category_update
+BEFORE UPDATE OF type, category ON transactions
+FOR EACH ROW
+WHEN NEW.type = 'expense' AND NEW.category NOT IN ('dining')
+BEGIN
+  SELECT RAISE(ABORT, 'category does not match type');
+END
+''');
+          await database.execute('''
+CREATE TRIGGER trg_transactions_amount_integer_insert
+BEFORE INSERT ON transactions
+FOR EACH ROW
+WHEN NEW.amount_cents <= 0
+BEGIN
+  SELECT RAISE(ABORT, 'amount_cents must be positive');
+END
+''');
+          await database.execute('''
+CREATE TRIGGER trg_transactions_amount_integer_update
+BEFORE UPDATE OF amount_cents ON transactions
+FOR EACH ROW
+WHEN NEW.amount_cents <= 0
+BEGIN
+  SELECT RAISE(ABORT, 'amount_cents must be positive');
+END
+''');
+        },
+      ),
+    );
+    await v3.insert('transactions', {
+      'id': 7,
+      'amount_cents': 2580,
+      'type': 'expense',
+      'category': 'dining',
+      'note': '旧账目',
+      'original_text': '旧餐饮账目',
+      'transaction_date': '2026-08-31',
+      'created_at': '2026-08-31T10:00:00Z',
+      'updated_at': '2026-08-31T10:00:00Z',
+      'deleted_at': '2026-09-01T10:00:00Z',
+    });
+    await v3.insert('budgets', {
+      'id': 9,
+      'category_code': 'dining',
+      'month': '2026-09',
+      'amount_cents': 50000,
+      'enabled': 0,
+      'created_at': '2026-09-01T00:00:00Z',
+      'updated_at': '2026-09-02T00:00:00Z',
+    });
+    await v3.close();
+
+    db = await AppDatabase.openAtPath(
+      databasePath,
+      databaseFactory: databaseFactoryFfi,
+    );
+
+    expect(await db.getVersion(), DatabaseSchema.version);
+    expect(await db.query('transactions'), contains(containsPair('id', 7)));
+    expect(
+      await db.query('budgets'),
+      contains(
+        allOf(
+          containsPair('id', 9),
+          containsPair('amount_cents', 50000),
+          containsPair('month', '2026-09'),
+          containsPair('enabled', 0),
+        ),
+      ),
+    );
+    expect(
+      (await db.rawQuery('PRAGMA index_list(budgets)'))
+          .map((row) => row['name']),
+      contains('idx_budgets_month_enabled'),
+    );
+
+    await db.insert('budgets', {
+      'category_code': 'clothing_beauty',
+      'month': '2026-10',
+      'amount_cents': 10000,
+      'enabled': 1,
+      'created_at': '2026-09-01T00:00:00Z',
+      'updated_at': '2026-09-01T00:00:00Z',
+    });
+    await expectLater(
+      db.insert('budgets', {
+        'category_code': 'dining',
+        'month': '2026-09',
+        'amount_cents': 1,
+        'enabled': 1,
+        'created_at': '2026-09-01T00:00:00Z',
+        'updated_at': '2026-09-01T00:00:00Z',
+      }),
+      throwsA(isA<DatabaseException>()),
+    );
+
+    await db.insert('transactions', {
+      'amount_cents': 1200,
+      'type': 'expense',
+      'category': 'clothing_beauty',
+      'note': null,
+      'original_text': '买衣服',
+      'transaction_date': '2026-09-05',
+      'created_at': '2026-09-05T00:00:00Z',
+      'updated_at': '2026-09-05T00:00:00Z',
+      'deleted_at': null,
+    });
+    await expectLater(
+      db.insert('transactions', {
+        'amount_cents': 1200.5,
+        'type': 'expense',
+        'category': 'dining',
+        'note': null,
+        'original_text': '小数分',
+        'transaction_date': '2026-09-05',
+        'created_at': '2026-09-05T00:00:00Z',
+        'updated_at': '2026-09-05T00:00:00Z',
+        'deleted_at': null,
+      }),
+      throwsA(isA<DatabaseException>()),
+    );
+    await expectLater(
+      db.insert('transactions', {
+        'amount_cents': 1200,
+        'type': 'expense',
+        'category': 'not_a_category',
+        'note': null,
+        'original_text': '未知分类',
+        'transaction_date': '2026-09-05',
+        'created_at': '2026-09-05T00:00:00Z',
+        'updated_at': '2026-09-05T00:00:00Z',
+        'deleted_at': null,
+      }),
       throwsA(isA<DatabaseException>()),
     );
   });

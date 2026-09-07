@@ -74,8 +74,7 @@ void main() {
     testWidgets('AI 确认本地分类后进入编辑页不再重复确认，刷新失败也不误判取消', (tester) async {
       await _pumpApp(tester, fixture);
 
-      await tester.tap(find.byKey(const Key('open-ai-classification')));
-      await tester.pumpAndSettle();
+      await _openAccountingTool(tester, 'accounting-tool-ai-classification');
       await tester.enterText(
         find.byKey(const Key('ai-classification-input')),
         '蜜雪冰城 12',
@@ -523,7 +522,7 @@ void main() {
       );
     });
 
-    testWidgets('首页把最近账目放在搜索和快速记账之前', (tester) async {
+    testWidgets('首页将搜索置顶，快速记账位于预算和最近账目之间', (tester) async {
       await tester.pumpWidget(SmartLedgerApp(controller: fixture.controller));
       await tester.pump(const Duration(milliseconds: 100));
 
@@ -535,8 +534,17 @@ void main() {
         find.byKey(const Key('quick-input')),
       );
 
-      expect(recentHeader.dy, lessThan(searchInput.dy));
-      expect(searchInput.dy, lessThan(quickInput.dy));
+      final stats = tester.getTopLeft(find.text('今天支出'));
+      final budgetHeader = tester.getTopLeft(find.text('本月预算'));
+
+      expect(searchInput.dy, lessThan(stats.dy));
+      expect(stats.dy, lessThan(budgetHeader.dy));
+      expect(budgetHeader.dy, lessThan(quickInput.dy));
+      expect(quickInput.dy, lessThan(recentHeader.dy));
+      expect(
+        tester.getSize(find.byKey(const Key('home-search-card'))).height,
+        lessThan(100),
+      );
     });
   });
 
@@ -570,6 +578,13 @@ Future<void> _openDraft(WidgetTester tester, String text) async {
 Future<void> _openBatchDraft(WidgetTester tester, String text) async {
   await _enterVisibleText(tester, find.byKey(const Key('quick-input')), text);
   await _tapVisible(tester, find.byKey(const Key('batch-entry-button')));
+  await tester.pumpAndSettle();
+}
+
+Future<void> _openAccountingTool(WidgetTester tester, String toolKey) async {
+  await _tapVisible(tester, find.byKey(const Key('open-accounting-tools')));
+  await tester.pumpAndSettle();
+  await _tapVisible(tester, find.byKey(Key(toolKey)));
   await tester.pumpAndSettle();
 }
 

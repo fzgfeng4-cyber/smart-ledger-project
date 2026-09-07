@@ -20,6 +20,72 @@ void main() {
     expect(result.transactions[2].draft!.category, 'dining');
   });
 
+  test('支持中文句号和感叹号等自然句子边界', () {
+    final result = parser.parse('买菜5元。骑车3元！喝水5元；出去玩10元');
+
+    expect(result.transactions, hasLength(4));
+    expect(
+      result.transactions.map((transaction) => transaction.draft!.amountCents),
+      [500, 300, 500, 1000],
+    );
+  });
+
+  test('公共日期会被没有单独日期的候选继承', () {
+    final result = parser.parse('2026-09-06，买菜5元，骑车3元');
+
+    expect(result.transactions, hasLength(2));
+    expect(
+      result.transactions.map(
+        (transaction) => transaction.draft!.transactionDate,
+      ),
+      ['2026-09-06', '2026-09-06'],
+    );
+  });
+
+  test('今天可以作为整段输入的公共日期', () {
+    final result = parser.parse('今天，买菜5元，骑车3元');
+
+    expect(result.transactions, hasLength(2));
+    expect(
+      result.transactions.every(
+        (transaction) => transaction.draft!.transactionDate == '2026-08-30',
+      ),
+      isTrue,
+    );
+  });
+
+  test('每一条带独立日期时保留各自日期', () {
+    final result = parser.parse('2026-09-05买菜5元\n2026-09-06加油3元');
+
+    expect(
+      result.transactions.map(
+        (transaction) => transaction.draft!.transactionDate,
+      ),
+      ['2026-09-05', '2026-09-06'],
+    );
+  });
+
+  test('小数金额不会因为小数点被拆开', () {
+    final result = parser.parse('买菜3.50元，喝水5元');
+
+    expect(result.transactions, hasLength(2));
+    expect(result.transactions.first.draft!.amountCents, 350);
+    expect(result.transactions.last.draft!.amountCents, 500);
+  });
+
+  test('缺少金额的候选会保留并等待修正', () {
+    final result = parser.parse('买菜，喝水5元');
+
+    expect(result.transactions, hasLength(2));
+    expect(result.transactions.first.isEmpty, isFalse);
+    expect(result.transactions.first.hasBlockingIssues, isTrue);
+    expect(
+      result.transactions.first.parseResult.hasIssue('MISSING_AMOUNT'),
+      isTrue,
+    );
+    expect(result.transactions.last.draft!.amountCents, 500);
+  });
+
   test('支持没有分隔符的连续消费文本', () {
     final result = parser.parse('白菜10牛奶15饮料8');
 

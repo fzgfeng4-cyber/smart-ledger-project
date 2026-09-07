@@ -2,9 +2,11 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
 import '../../domain/statistics/statistics_summary.dart';
+import '../../domain/statistics/statistics_time_series.dart';
 import '../ledger_ui_controller.dart';
 import '../shared/ledger_formatters.dart';
 import '../shared/ui_components.dart';
+import 'statistics_chart_widgets.dart';
 
 class StatisticsPage extends StatefulWidget {
   const StatisticsPage({this.isActive = true, super.key});
@@ -46,11 +48,17 @@ class _StatisticsPageState extends State<StatisticsPage> {
     return Consumer<LedgerUiController>(
       builder: (context, controller, _) {
         final summary = controller.statisticsSummary;
+        final monthlySeries = controller.monthlyStatisticsTimeSeries;
+        final yearlySeries = controller.yearlyStatisticsTimeSeries;
+        final statisticsIsBusy =
+            controller.isStatisticsBusy ||
+            controller.isStatisticsRefreshPending;
+        final hasCompleteStatistics =
+            summary != null && monthlySeries != null && yearlySeries != null;
         final shouldShowLoading =
-            summary == null &&
+            !hasCompleteStatistics &&
             controller.statisticsError == null &&
-            (controller.isStatisticsBusy ||
-                controller.isStatisticsRefreshPending ||
+            (statisticsIsBusy ||
                 (widget.isActive && !controller.hasRequestedStatistics));
         return SafeArea(
           child: CustomScrollView(
@@ -70,14 +78,18 @@ class _StatisticsPageState extends State<StatisticsPage> {
                           child: CircularProgressIndicator(),
                         ),
                       )
-                    else if (controller.statisticsError != null &&
-                        summary == null)
+                    else if (controller.statisticsError != null)
                       _StatisticsErrorState(
                         message: controller.statisticsError!,
                         onRetry: controller.refreshStatistics,
                       )
                     else if (summary != null)
-                      _StatisticsSummaryView(summary: summary)
+                      _StatisticsSummaryView(
+                        summary: summary,
+                        monthlySeries: monthlySeries,
+                        yearlySeries: yearlySeries,
+                        isRefreshing: statisticsIsBusy,
+                      )
                     else
                       const _StatisticsEmptyState(),
                   ]),
@@ -91,93 +103,288 @@ class _StatisticsPageState extends State<StatisticsPage> {
   }
 }
 
-class _StatisticsSummaryView extends StatelessWidget {
-  const _StatisticsSummaryView({required this.summary});
+enum _StatisticsPeriod { month, year }
+
+class _StatisticsSummaryView extends StatefulWidget {
+  const _StatisticsSummaryView({
+    required this.summary,
+    required this.monthlySeries,
+    required this.yearlySeries,
+    required this.isRefreshing,
+  });
 
   final StatisticsSummary summary;
+  final StatisticsTimeSeries? monthlySeries;
+  final StatisticsTimeSeries? yearlySeries;
+  final bool isRefreshing;
+
+  @override
+  State<_StatisticsSummaryView> createState() => _StatisticsSummaryViewState();
+}
+
+class _StatisticsSummaryViewState extends State<_StatisticsSummaryView> {
+  _StatisticsPeriod _period = _StatisticsPeriod.month;
+  bool _showAllBuckets = false;
+
+  StatisticsTimeSeries? get _selectedSeries =>
+      _period == _StatisticsPeriod.month
+      ? widget.monthlySeries
+      : widget.yearlySeries;
+
+  String get _periodName => _period == _StatisticsPeriod.month ? '月度' : '年度';
+
+  String get _periodContext {
+    final series = _selectedSeries;
+    final date = series == null
+        ? null
+        : DateTime.tryParse(series.range.startDateInclusive);
+    if (date == null) {
+      return _period == _StatisticsPeriod.month ? '本月' : '本年';
+    }
+    return _period == _StatisticsPeriod.month
+        ? '本月（${date.year}年${date.month}月）'
+        : '本年（${date.year}年）';
+  }
+
+  String get _periodAmountPrefix {
+    final series = _selectedSeries;
+    final date = series == null
+        ? null
+        : DateTime.tryParse(series.range.startDateInclusive);
+    if (date == null) {
+      return _period == _StatisticsPeriod.month ? '本月' : '本年';
+    }
+    return _period == _StatisticsPeriod.month
+        ? '${date.year}年${date.month}月'
+        : '${date.year}年';
+  }
+
+  int get _expenseTotal {
+    if (_period == _StatisticsPeriod.month) {
+      return widget.summary.expenseTotalCents;
+    }
+    return _selectedSeries?.buckets.fold<int>(
+          0,
+          (total, bucket) => total + bucket.expenseTotalCents,
+        ) ??
+        0;
+  }
+
+  int get _incomeTotal {
+    if (_period == _StatisticsPeriod.month) {
+      return widget.summary.incomeTotalCents;
+    }
+    return _selectedSeries?.buckets.fold<int>(
+          0,
+          (total, bucket) => total + bucket.incomeTotalCents,
+        ) ??
+        0;
+  }
 
   @override
   Widget build(BuildContext context) {
-    final categories = summary.expenseCategories;
+    final series = _selectedSeries;
+    final chartTitle = _period == _StatisticsPeriod.month ? '本月趋势' : '年度趋势';
+    final categories = widget.summary.expenseCategories;
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        Row(
-          children: [
-            Expanded(
-              child: StatCard(
-                label: '本月支出',
-                amountCents: summary.expenseTotalCents,
-                icon: Icons.arrow_upward,
+        if (widget.isRefreshing) const LinearProgressIndicator(),
+        if (widget.isRefreshing) const SizedBox(height: 8),
+        Semantics(
+          container: true,
+          label: '统计周期，当前$_periodName，$_periodContext',
+          child: SegmentedButton<_StatisticsPeriod>(
+            key: const Key('statistics-period-toggle'),
+            segments: const [
+              ButtonSegment<_StatisticsPeriod>(
+                value: _StatisticsPeriod.month,
+                icon: Icon(Icons.calendar_view_day),
+                label: KeyedSubtree(
+                  key: Key('statistics-monthly-toggle'),
+                  child: Text('月度'),
+                ),
               ),
-            ),
-            const SizedBox(width: 8),
-            Expanded(
-              child: StatCard(
-                label: '本月收入',
-                amountCents: summary.incomeTotalCents,
-                icon: Icons.arrow_downward,
+              ButtonSegment<_StatisticsPeriod>(
+                value: _StatisticsPeriod.year,
+                icon: Icon(Icons.calendar_month),
+                label: KeyedSubtree(
+                  key: Key('statistics-yearly-toggle'),
+                  child: Text('年度'),
+                ),
               ),
-            ),
-          ],
+            ],
+            selected: {_period},
+            onSelectionChanged: (selection) {
+              if (selection.isEmpty) {
+                return;
+              }
+              setState(() {
+                _period = selection.first;
+                _showAllBuckets = false;
+              });
+            },
+          ),
         ),
-        const SizedBox(height: 20),
+        const SizedBox(height: 12),
+        Text(
+          _periodContext,
+          key: const Key('statistics-period-label'),
+          style: Theme.of(context).textTheme.titleMedium
+              ?.copyWith(fontWeight: FontWeight.w700),
+        ),
+        const SizedBox(height: 10),
+        _StatisticsTotals(
+          prefix: _periodAmountPrefix,
+          expenseTotalCents: _expenseTotal,
+          incomeTotalCents: _incomeTotal,
+        ),
+        const SizedBox(height: 18),
+        SectionHeader(title: chartTitle),
+        const SizedBox(height: 8),
+        StatisticsBarChart(
+          key: Key(
+            _period == _StatisticsPeriod.month
+                ? 'statistics-monthly-chart'
+                : 'statistics-annual-chart',
+          ),
+          title: chartTitle,
+          series: series,
+          emptyKey: _period == _StatisticsPeriod.month
+              ? 'statistics-monthly-chart-empty'
+              : 'statistics-annual-chart-empty',
+          isLoading: widget.isRefreshing && series == null,
+          showAllBuckets: _showAllBuckets,
+        ),
+        const SizedBox(height: 2),
+        SwitchListTile.adaptive(
+          key: const Key('statistics-show-all-buckets'),
+          contentPadding: EdgeInsets.zero,
+          dense: true,
+          title: Text(_period == _StatisticsPeriod.month ? '显示全部日期' : '显示全部月份'),
+          value: _showAllBuckets,
+          onChanged: series == null
+              ? null
+              : (value) => setState(() => _showAllBuckets = value),
+        ),
+        const SizedBox(height: 18),
+        const SectionHeader(title: '支出分类'),
+        const SizedBox(height: 8),
+        StatisticsExpensePieChart(
+          key: const Key('statistics-expense-pie-chart'),
+          title: '支出分类',
+          range: widget.summary.range,
+          categories: categories,
+          expenseTotalCents: widget.summary.expenseTotalCents,
+          emptyKey: 'statistics-expense-pie-empty',
+        ),
+        const SizedBox(height: 18),
         const SectionHeader(title: '分类占比'),
         const SizedBox(height: 8),
-        if (categories.isEmpty)
-          const _StatisticsEmptyState()
-        else
-          ...categories.map(
-            (category) => Padding(
-              padding: const EdgeInsets.only(bottom: 10),
-              child: _CategoryProportionTile(category: category),
-            ),
-          ),
+        _ExpenseCategoryTable(
+          categories: categories,
+          empty: categories.isEmpty,
+        ),
       ],
     );
   }
 }
 
-class _CategoryProportionTile extends StatelessWidget {
-  const _CategoryProportionTile({required this.category});
+class _StatisticsTotals extends StatelessWidget {
+  const _StatisticsTotals({
+    required this.prefix,
+    required this.expenseTotalCents,
+    required this.incomeTotalCents,
+  });
 
-  final ExpenseCategoryStatistics category;
+  final String prefix;
+  final int expenseTotalCents;
+  final int incomeTotalCents;
+
+  @override
+  Widget build(BuildContext context) {
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final itemWidth = constraints.maxWidth >= 460
+            ? (constraints.maxWidth - 16) / 3
+            : constraints.maxWidth;
+        return Wrap(
+          spacing: 8,
+          runSpacing: 8,
+          children: [
+            SizedBox(
+              width: itemWidth,
+              child: StatCard(
+                label: '$prefix支出',
+                amountCents: expenseTotalCents,
+                icon: Icons.arrow_upward,
+              ),
+            ),
+            SizedBox(
+              width: itemWidth,
+              child: StatCard(
+                label: '$prefix收入',
+                amountCents: incomeTotalCents,
+                icon: Icons.arrow_downward,
+              ),
+            ),
+            SizedBox(
+              width: itemWidth,
+              child: _BalanceCard(
+                label: '$prefix结余',
+                amountCents: incomeTotalCents - expenseTotalCents,
+              ),
+            ),
+          ],
+        );
+      },
+    );
+  }
+}
+
+class _BalanceCard extends StatelessWidget {
+  const _BalanceCard({required this.label, required this.amountCents});
+
+  final String label;
+  final int amountCents;
 
   @override
   Widget build(BuildContext context) {
     final colorScheme = Theme.of(context).colorScheme;
-    final percentage = category.percentage;
+    final amountColor = amountCents < 0
+        ? colorScheme.error
+        : colorScheme.primary;
     return DecoratedBox(
-      key: Key('statistics-category-${category.code}'),
       decoration: BoxDecoration(
-        color: colorScheme.surfaceContainerLow,
+        color: colorScheme.surfaceContainerHighest,
         borderRadius: BorderRadius.circular(8),
       ),
       child: Padding(
         padding: const EdgeInsets.all(12),
         child: Column(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          mainAxisSize: MainAxisSize.min,
           children: [
             Row(
               children: [
-                Expanded(
+                Icon(Icons.account_balance, size: 18, color: amountColor),
+                const SizedBox(width: 6),
+                Flexible(
                   child: Text(
-                    category.label,
-                    style: Theme.of(context).textTheme.titleSmall,
+                    label,
+                    style: Theme.of(context).textTheme.labelMedium,
                   ),
                 ),
-                Text(formatMoneyCents(category.amountCents)),
-                const SizedBox(width: 8),
-                Text('${percentage.toStringAsFixed(1)}%'),
               ],
             ),
             const SizedBox(height: 8),
-            Semantics(
-              label: '${category.label}占支出${percentage.toStringAsFixed(1)}%',
-              value: '${percentage.toStringAsFixed(1)}%',
-              child: LinearProgressIndicator(
-                value: category.proportion.clamp(0.0, 1.0),
-                minHeight: 8,
+            FittedBox(
+              fit: BoxFit.scaleDown,
+              alignment: Alignment.centerLeft,
+              child: Text(
+                _formatSignedMoney(amountCents),
+                style: Theme.of(context).textTheme.titleLarge
+                    ?.copyWith(color: amountColor, fontWeight: FontWeight.w700),
               ),
             ),
           ],
@@ -185,6 +392,102 @@ class _CategoryProportionTile extends StatelessWidget {
       ),
     );
   }
+}
+
+class _ExpenseCategoryTable extends StatelessWidget {
+  const _ExpenseCategoryTable({required this.categories, required this.empty});
+
+  final List<ExpenseCategoryStatistics> categories;
+  final bool empty;
+
+  @override
+  Widget build(BuildContext context) {
+    if (empty) {
+      return const _StatisticsEmptyState();
+    }
+
+    final textTheme = Theme.of(context).textTheme;
+    return Table(
+      key: const Key('statistics-expense-category-table'),
+      columnWidths: const {
+        0: FlexColumnWidth(1.4),
+        1: FlexColumnWidth(1),
+        2: FixedColumnWidth(62),
+      },
+      defaultVerticalAlignment: TableCellVerticalAlignment.middle,
+      children: [
+        TableRow(
+          decoration: BoxDecoration(
+            border: Border(
+              bottom: BorderSide(
+                color: Theme.of(context).colorScheme.outlineVariant,
+              ),
+            ),
+          ),
+          children: [
+            _TableHeaderCell('分类', textTheme),
+            _TableHeaderCell('金额', textTheme, alignment: TextAlign.right),
+            _TableHeaderCell('占比', textTheme, alignment: TextAlign.right),
+          ],
+        ),
+        ...categories.map(
+          (category) => TableRow(
+            key: ValueKey('statistics-category-row-${category.code}'),
+            decoration: BoxDecoration(
+              border: Border(
+                bottom: BorderSide(
+                  color: Theme.of(context).colorScheme.outlineVariant,
+                ),
+              ),
+            ),
+            children: [
+              Semantics(
+                label:
+                    '${category.label}，金额 ${formatMoneyCents(category.amountCents)}，占比 ${category.percentage.toStringAsFixed(1)}%',
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(vertical: 10),
+                  child: Text(
+                    category.label,
+                    key: Key('statistics-category-${category.code}'),
+                  ),
+                ),
+              ),
+              _TableBodyCell(
+                formatMoneyCents(category.amountCents),
+                alignment: TextAlign.right,
+              ),
+              _TableBodyCell(
+                '${category.percentage.toStringAsFixed(1)}%',
+                alignment: TextAlign.right,
+              ),
+            ],
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+Widget _TableHeaderCell(
+  String text,
+  TextTheme textTheme, {
+  TextAlign alignment = TextAlign.left,
+}) {
+  return Padding(
+    padding: const EdgeInsets.symmetric(vertical: 8),
+    child: Text(
+      text,
+      textAlign: alignment,
+      style: textTheme.labelMedium?.copyWith(fontWeight: FontWeight.w700),
+    ),
+  );
+}
+
+Widget _TableBodyCell(String text, {TextAlign alignment = TextAlign.left}) {
+  return Padding(
+    padding: const EdgeInsets.symmetric(vertical: 10),
+    child: Text(text, textAlign: alignment),
+  );
 }
 
 class _StatisticsEmptyState extends StatelessWidget {
@@ -238,4 +541,11 @@ class _StatisticsErrorState extends StatelessWidget {
       ),
     );
   }
+}
+
+String _formatSignedMoney(int cents) {
+  if (cents < 0) {
+    return '-${formatMoneyCents(cents.abs())}';
+  }
+  return formatMoneyCents(cents);
 }

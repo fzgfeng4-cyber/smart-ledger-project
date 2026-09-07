@@ -3,7 +3,7 @@ import 'package:sqflite/sqflite.dart';
 final class DatabaseSchema {
   const DatabaseSchema._();
 
-  static const version = 3;
+  static const version = 4;
   static const maxSqliteInteger = 9223372036854775807;
   static const transactionsTable = 'transactions';
   static const budgetsTable = 'budgets';
@@ -55,6 +55,8 @@ final class DatabaseSchema {
           await _createV2(db);
         case 3:
           await _createV3(db);
+        case 4:
+          await _migrateV3ToV4(db);
         default:
           throw StateError('缺少数据库迁移版本: $nextVersion');
       }
@@ -101,7 +103,18 @@ CREATE TABLE $budgetsTable (
       'entertainment',
       'children',
       'medical',
-      'other_expense'
+      'other_expense',
+      'clothing_beauty',
+      'education_learning',
+      'travel_vacation',
+      'gifts_social',
+      'pets',
+      'insurance',
+      'digital_appliances',
+      'fitness_sports',
+      'debt_repayment',
+      'taxes_fees',
+      'charity_donation'
     )
   ),
   month TEXT NOT NULL CHECK (
@@ -165,6 +178,87 @@ CREATE TABLE $importBatchesTable (
     await db.execute('''
 CREATE INDEX idx_import_batches_imported_at
 ON $importBatchesTable (imported_at DESC, id DESC)
+''');
+  }
+
+  static Future<void> _migrateV3ToV4(Database db) async {
+    await _dropTransactionCategoryTriggers(db);
+
+    const legacyBudgetsTable = 'budgets_v3_legacy';
+    try {
+      await db.execute('DROP INDEX IF EXISTS idx_budgets_month_enabled');
+      await db.execute(
+        'ALTER TABLE $budgetsTable RENAME TO $legacyBudgetsTable',
+      );
+      await _createV4Budgets(db);
+      await db.execute('''
+INSERT INTO $budgetsTable (
+  id, category_code, month, amount_cents, enabled, created_at, updated_at
+)
+SELECT id, category_code, month, amount_cents, enabled, created_at, updated_at
+FROM $legacyBudgetsTable
+''');
+      await db.execute('DROP TABLE $legacyBudgetsTable');
+      await db.execute('''
+CREATE INDEX idx_budgets_month_enabled
+ON $budgetsTable (month, enabled)
+''');
+    } on Object catch (error) {
+      throw StateError('V3 到 V4 预算表迁移失败，原有预算数据未被静默丢弃: $error');
+    }
+  }
+
+  static Future<void> _createV4Budgets(Database db) async {
+    await db.execute('''
+CREATE TABLE $budgetsTable (
+  id INTEGER PRIMARY KEY,
+  category_code TEXT NOT NULL CHECK (
+    category_code IN (
+      'dining',
+      'groceries_food',
+      'daily_necessities',
+      'transportation',
+      'vehicle_fuel',
+      'housing',
+      'communication',
+      'entertainment',
+      'children',
+      'medical',
+      'other_expense',
+      'clothing_beauty',
+      'education_learning',
+      'travel_vacation',
+      'gifts_social',
+      'pets',
+      'insurance',
+      'digital_appliances',
+      'fitness_sports',
+      'debt_repayment',
+      'taxes_fees',
+      'charity_donation'
+    )
+  ),
+  month TEXT NOT NULL CHECK (
+    typeof(month) = 'text'
+    AND length(month) = 7
+    AND month GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]'
+    AND substr(month, 1, 4) != '0000'
+    AND substr(month, 6, 2) BETWEEN '01' AND '12'
+  ),
+  amount_cents INTEGER NOT NULL CHECK (
+    typeof(amount_cents) = 'integer' AND amount_cents > 0
+  ),
+  enabled INTEGER NOT NULL DEFAULT 1 CHECK (
+    typeof(enabled) = 'integer' AND enabled IN (0, 1)
+  ),
+  created_at TEXT NOT NULL CHECK (
+    typeof(created_at) = 'text' AND length(trim(created_at)) > 0
+  ),
+  updated_at TEXT NOT NULL CHECK (
+    typeof(updated_at) = 'text' AND length(trim(updated_at)) > 0
+  ),
+  UNIQUE(category_code, month)
+)
 ''');
   }
 
@@ -260,15 +354,38 @@ ON $importBatchesTable (imported_at DESC, id DESC)
       'entertainment',
       'children',
       'medical',
+      'clothing_beauty',
+      'education_learning',
+      'travel_vacation',
+      'gifts_social',
+      'pets',
+      'insurance',
+      'digital_appliances',
+      'fitness_sports',
+      'debt_repayment',
+      'taxes_fees',
+      'charity_donation',
       'other_expense',
     };
-    final incomeCategories = <String>{'salary', 'other_income'};
+    final incomeCategories = <String>{
+      'salary',
+      'bonus',
+      'freelance',
+      'business_income',
+      'investment_income',
+      'rental_income',
+      'benefits_subsidies',
+      'pension',
+      'gift_red_envelope',
+      'other_income',
+    };
     return type == 'expense'
         ? expenseCategories.contains(category.trim())
         : incomeCategories.contains(category.trim());
   }
 
   static Future<void> _ensureIntegrityTriggers(Database db) async {
+    await _dropTransactionCategoryTriggers(db);
     await _validateExistingTransactionRows(db);
 
     await db.execute('''
@@ -312,7 +429,7 @@ END
 ''');
 
     await db.execute('''
-CREATE TRIGGER IF NOT EXISTS trg_transactions_type_category_insert
+    CREATE TRIGGER IF NOT EXISTS trg_transactions_type_category_insert
 BEFORE INSERT ON $transactionsTable
 FOR EACH ROW
 WHEN
@@ -327,10 +444,32 @@ WHEN
     'entertainment',
     'children',
     'medical',
+    'clothing_beauty',
+    'education_learning',
+    'travel_vacation',
+    'gifts_social',
+    'pets',
+    'insurance',
+    'digital_appliances',
+    'fitness_sports',
+    'debt_repayment',
+    'taxes_fees',
+    'charity_donation',
     'other_expense'
   ))
   OR
-  (NEW.type = 'income' AND NEW.category NOT IN ('salary', 'other_income'))
+  (NEW.type = 'income' AND NEW.category NOT IN (
+    'salary',
+    'bonus',
+    'freelance',
+    'business_income',
+    'investment_income',
+    'rental_income',
+    'benefits_subsidies',
+    'pension',
+    'gift_red_envelope',
+    'other_income'
+  ))
 BEGIN
   SELECT RAISE(ABORT, 'category does not match type');
 END
@@ -352,10 +491,32 @@ WHEN
     'entertainment',
     'children',
     'medical',
+    'clothing_beauty',
+    'education_learning',
+    'travel_vacation',
+    'gifts_social',
+    'pets',
+    'insurance',
+    'digital_appliances',
+    'fitness_sports',
+    'debt_repayment',
+    'taxes_fees',
+    'charity_donation',
     'other_expense'
   ))
   OR
-  (NEW.type = 'income' AND NEW.category NOT IN ('salary', 'other_income'))
+  (NEW.type = 'income' AND NEW.category NOT IN (
+    'salary',
+    'bonus',
+    'freelance',
+    'business_income',
+    'investment_income',
+    'rental_income',
+    'benefits_subsidies',
+    'pension',
+    'gift_red_envelope',
+    'other_income'
+  ))
 BEGIN
   SELECT RAISE(ABORT, 'category does not match type');
 END
@@ -395,17 +556,54 @@ WHERE
     'vehicle_fuel',
     'housing',
     'communication',
-    'entertainment',
-    'children',
-    'medical',
-    'other_expense'
+      'entertainment',
+      'children',
+      'medical',
+      'clothing_beauty',
+      'education_learning',
+      'travel_vacation',
+      'gifts_social',
+      'pets',
+      'insurance',
+      'digital_appliances',
+      'fitness_sports',
+      'debt_repayment',
+      'taxes_fees',
+      'charity_donation',
+      'other_expense'
   ))
   OR
-  (type = 'income' AND category NOT IN ('salary', 'other_income'))
+  (type = 'income' AND category NOT IN (
+    'salary',
+    'bonus',
+    'freelance',
+    'business_income',
+    'investment_income',
+    'rental_income',
+    'benefits_subsidies',
+    'pension',
+    'gift_red_envelope',
+    'other_income'
+  ))
 LIMIT 1
 ''');
     if (invalidCategoryRows.isNotEmpty) {
       throw StateError('transactions.type 与 category 存在不一致数据');
     }
+  }
+
+  static Future<void> _dropTransactionCategoryTriggers(Database db) async {
+    await db.execute(
+      'DROP TRIGGER IF EXISTS trg_transactions_amount_integer_insert',
+    );
+    await db.execute(
+      'DROP TRIGGER IF EXISTS trg_transactions_amount_integer_update',
+    );
+    await db.execute(
+      'DROP TRIGGER IF EXISTS trg_transactions_type_category_insert',
+    );
+    await db.execute(
+      'DROP TRIGGER IF EXISTS trg_transactions_type_category_update',
+    );
   }
 }

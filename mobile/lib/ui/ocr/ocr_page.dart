@@ -227,7 +227,7 @@ class _OcrPageState extends State<OcrPage> {
             offset: result.recognizedText.length,
           );
         _errorMessage = result.isFailure
-            ? result.failureReason?.message ?? '识别失败，请重试。'
+            ? result.failureReason?.displayMessage ?? '识别失败，请重试。'
             : null;
         _statusMessage = result.status == OcrStatus.cancelled
             ? '已取消识别，账本未修改。'
